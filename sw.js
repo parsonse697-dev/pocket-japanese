@@ -1,8 +1,8 @@
 // Offline support. The page is cached as a versioned "core"; sound clips
 // live in a separate cache keyed by content, so updates don't re-download them.
-const CORE = "pj-core-52d21ef684";
-const AI = "pj-ai-919bd74939";   // AI helper files, renamed whenever one of them changes
-const FILES = ["./", "index.html", "lex.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
+const CORE = "pj-core-b7443034fc";
+const AI = "pj-ai-e5812ed5d1";   // AI helper files, renamed whenever one of them changes
+const FILES = ["./", "index.html", "lex.js", "ai/ask.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CORE).then(c => c.addAll(FILES.map(f => new Request(f, {cache: "reload"})))).then(() => self.skipWaiting()));
 });
