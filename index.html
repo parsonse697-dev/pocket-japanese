@@ -84,6 +84,52 @@ footer{color:var(--mute);font-size:12px;text-align:center;padding:24px}
 [data-skin=retro] .cat h2,[data-skin=retro] .sec h3,[data-skin=retro] .cat p.blurb,[data-skin=retro] footer,[data-skin=retro] .you,[data-skin=retro] .you::before,[data-skin=retro] .aimeta,[data-skin=retro] .aimeta a,[data-skin=retro] .empty{color:#fff}
 [data-skin=retro] #askbar{background:#c0c0c0;border-top:2px solid #fff}
 [data-skin=retro] .bar{border-radius:0;background:#fff;border:2px solid;border-color:#404040 #fff #fff #404040}[data-skin=retro] .bar i{background:#000080}
+/* Washi paper: ink on cream paper, serif type, red seal accent */
+:root[data-skin=washi]{--bg:#f4ecd8;--card:#fbf6e9;--ink:#2b2420;--mute:#766858;--line:#d9ccb0;--accent:#b3261e;--chip:#ebe0c6;--jp:#1a1410}
+[data-skin=washi] body,[data-skin=washi] .jp{font-family:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",Georgia,"Times New Roman",serif}
+[data-skin=washi] .card{border-radius:2px;border:0;border-left:3px solid var(--accent);box-shadow:0 1px 0 var(--line);padding-left:18px}
+[data-skin=washi] #q,[data-skin=washi] #askq,[data-skin=washi] nav a,[data-skin=washi] .tags span,[data-skin=washi] #tabs button,[data-skin=washi] #skins button,[data-skin=washi] .aibtn,[data-skin=washi] #asksend,[data-skin=washi] .ainote{border-radius:2px}
+[data-skin=washi] h1{letter-spacing:.08em;font-weight:600}
+[data-skin=washi] .cat h2{border-bottom:1px solid var(--ink);padding-bottom:4px;letter-spacing:.04em}
+[data-skin=washi] .en{font-style:italic}
+/* Terminal: green phosphor on black, monospace, square */
+:root[data-skin=terminal]{--bg:#000;--card:#000;--ink:#33ff66;--mute:#22bb4c;--line:#1a8f3a;--accent:#ffcc00;--chip:#001a08;--jp:#8dffab}
+[data-skin=terminal] body{font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,"Courier New",monospace;font-size:15px}
+[data-skin=terminal] .card,[data-skin=terminal] #q,[data-skin=terminal] #askq,[data-skin=terminal] nav a,[data-skin=terminal] .tags span,[data-skin=terminal] #tabs button,[data-skin=terminal] #skins button,[data-skin=terminal] .aibtn,[data-skin=terminal] #asksend,[data-skin=terminal] .ainote,[data-skin=terminal] .bar{border-radius:0}
+[data-skin=terminal] .card{border-style:dashed}
+[data-skin=terminal] h1::before{content:"$ "}[data-skin=terminal] .en::before{content:"> ";color:var(--accent)}
+[data-skin=terminal] nav a,[data-skin=terminal] .tags span{border:1px solid var(--line);color:var(--ink)}
+[data-skin=terminal] #tabs button.on,[data-skin=terminal] #skins button.on,[data-skin=terminal] .aibtn,[data-skin=terminal] #asksend{background:var(--ink);border-color:var(--ink);color:#000}
+[data-skin=terminal] .tags span.hear,[data-skin=terminal] .tags span.rude,[data-skin=terminal] .tags span.careful{color:var(--accent)}
+/* Neon night: deep purple with glowing pink and cyan */
+:root[data-skin=neon]{--bg:#0b0720;--card:#150d33;--ink:#f1eaff;--mute:#ab9dd8;--line:#3a2a7a;--accent:#ff4fc3;--chip:#22165a;--jp:#7df9ff}
+[data-skin=neon] .card{border-color:#5b3cff;box-shadow:0 0 16px rgba(255,79,195,.22)}
+[data-skin=neon] .jp{text-shadow:0 0 12px rgba(125,249,255,.55)}
+[data-skin=neon] h1{background:linear-gradient(90deg,#ff4fc3,#7df9ff);-webkit-background-clip:text;background-clip:text;color:transparent}
+[data-skin=neon] h1 span{color:var(--mute)}
+[data-skin=neon] #q:focus,[data-skin=neon] #askq:focus{box-shadow:0 0 12px rgba(255,79,195,.5)}
+[data-skin=neon] .tags span.hear{color:#7df9ff}
+/* Matcha: calm greens, soft borderless cards */
+:root[data-skin=matcha]{--bg:#eef3e6;--card:#fafcf5;--ink:#26331f;--mute:#5d6e55;--line:#cfdcc0;--accent:#4a7426;--chip:#e0ead2;--jp:#1b2616}
+@media (prefers-color-scheme:dark){:root[data-skin=matcha]{--bg:#141a10;--card:#1e2618;--ink:#e6efdc;--mute:#9db090;--line:#33402a;--accent:#a3cf6f;--chip:#28331f;--jp:#fff}}
+[data-skin=matcha] .card{border:0;border-radius:18px;box-shadow:0 2px 10px rgba(40,60,20,.10)}
+[data-skin=matcha] #q,[data-skin=matcha] #askq{border-radius:18px}
+[data-skin=matcha] .cat h2{font-weight:500}
+@media (prefers-color-scheme:dark){[data-skin=matcha] #tabs button.on,[data-skin=matcha] #skins button.on,[data-skin=matcha] .aibtn,[data-skin=matcha] #asksend{color:#141a10}}
+/* High contrast: pure black and white with yellow, very large and bold */
+:root[data-skin=contrast]{--bg:#000;--card:#000;--ink:#fff;--mute:#fff;--line:#fff;--accent:#ffe600;--chip:#000;--jp:#ffe600}
+[data-skin=contrast] body{font-size:20px;font-weight:500;line-height:1.55}
+[data-skin=contrast] .card{border:3px solid #fff;border-radius:6px;padding:18px;margin:16px 0}
+[data-skin=contrast] .jp{font-size:34px;font-weight:700}[data-skin=contrast] .sub .jp{font-size:26px}
+[data-skin=contrast] .en{font-size:23px}[data-skin=contrast] .rom{font-size:20px}[data-skin=contrast] .note{font-size:18px}
+[data-skin=contrast] .where,[data-skin=contrast] .sub .label,[data-skin=contrast] #count{font-size:15px}
+[data-skin=contrast] .sub{border-top:2px solid #fff}
+[data-skin=contrast] nav a,[data-skin=contrast] .tags span{border:2px solid #fff;font-size:15px;padding:6px 12px;color:#fff}
+[data-skin=contrast] .tags span.hear,[data-skin=contrast] .tags span.rude,[data-skin=contrast] .tags span.careful{color:#ffe600;border-color:#ffe600}
+[data-skin=contrast] #q,[data-skin=contrast] #askq{border:3px solid #fff;font-size:21px}
+[data-skin=contrast] #tabs button,[data-skin=contrast] #skins button{border:2px solid #fff;color:#fff;font-size:16px}
+[data-skin=contrast] #tabs button.on,[data-skin=contrast] #skins button.on,[data-skin=contrast] .aibtn,[data-skin=contrast] #asksend{background:#ffe600;border-color:#ffe600;color:#000}
+[data-skin=contrast] .ainote{border:2px solid #fff;font-size:18px}
 </style><script>try{var k=localStorage.getItem("pj-skin")||"",r=document.documentElement;if(k==="light"||k==="dark")r.setAttribute("data-theme",k);else if(k)r.setAttribute("data-skin",k)}catch(e){}</script></head><body>
 <header><h1>Pocket Japanese <span id="stats"></span><button id="skinbtn" aria-label="Change how the app looks">🎨</button></h1>
 <div id="skins" class="hidden"></div>
@@ -247,7 +293,7 @@ document.addEventListener("click",ev=>{
   player.play().catch(()=>el.classList.remove("playing"));
 });
 // ---------- skins ----------
-const SKINS=[["","Auto"],["light","Light"],["dark","Dark"],["bubbly","Bubbly (big & easy)"],["retro","Retro 96"]];
+const SKINS=[["","Auto"],["light","Light"],["dark","Dark"],["bubbly","Bubbly (big & easy)"],["contrast","High contrast"],["retro","Retro 96"],["washi","Washi paper"],["matcha","Matcha"],["neon","Neon night"],["terminal","Terminal"]];
 const skinsEl=document.getElementById("skins");
 skinsEl.innerHTML=SKINS.map(([k,n])=>`<button data-k="${k}">${n}</button>`).join("");
 function setSkin(k,save){
