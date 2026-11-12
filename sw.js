@@ -1,13 +1,14 @@
 // Offline support. The page is cached as a versioned "core"; sound clips
 // live in a separate cache keyed by content, so updates don't re-download them.
-const CORE = "pj-core-e4de327312";
+const CORE = "pj-core-5043746a00";
+const AI = "pj-ai-d0b743fbef";   // AI helper files, renamed whenever one of them changes
 const FILES = ["./", "index.html", "lex.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CORE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CORE).then(c => c.addAll(FILES.map(f => new Request(f, {cache: "reload"})))).then(() => self.skipWaiting()));
 });
 self.addEventListener("activate", e => {
   e.waitUntil(caches.keys().then(keys => Promise.all(
-    keys.filter(k => k.startsWith("pj-core-") && k !== CORE).map(k => caches.delete(k))
+    keys.filter(k => (k.startsWith("pj-core-") && k !== CORE) || (k.startsWith("pj-ai-") && k !== AI)).map(k => caches.delete(k))
   )).then(() => self.clients.claim()));
 });
 self.addEventListener("fetch", e => {
@@ -17,9 +18,13 @@ self.addEventListener("fetch", e => {
     caches.match(req, {ignoreSearch: true}).then(hit => hit ||
       (req.mode === "navigate" ? caches.match("index.html") : null)).then(hit => hit ||
       fetch(req).then(res => {
-        if (res.ok && req.url.includes("/audio/")) {
+        const u = req.url;
+        if (res.ok && u.includes("/audio/")) {
           const copy = res.clone();
           caches.open("pj-audio-v1").then(c => c.put(req, copy));
+        } else if (res.ok && u.includes("/ai/") && !u.endsWith("/ask.js")) {
+          const copy = res.clone();   // AI helper files: only fetched after the user says yes
+          caches.open(AI).then(c => c.put(req, copy));
         }
         return res;
       }))

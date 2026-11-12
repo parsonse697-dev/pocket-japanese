@@ -50,13 +50,48 @@ main{max-width:760px;margin:0 auto;padding:4px 16px 80px}
 footer{color:var(--mute);font-size:12px;text-align:center;padding:24px}
 .card.dict{border-style:dashed}.tts::after{content:"🔊 phone voice";font-size:11px}
 .hidden{display:none}
-</style></head><body>
-<header><h1>Pocket Japanese <span id="stats"></span></h1>
+.cat{content-visibility:auto;contain-intrinsic-size:auto 3000px}
+/* ---------- skins (picked with the palette button; saved on the device) ---------- */
+#skinbtn{float:right;border:0;background:none;font-size:18px;padding:0 4px;line-height:1.2;cursor:pointer}
+#skins{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}#skins.hidden{display:none}
+#skins button{font:inherit;font-size:13px;padding:6px 12px;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+#skins button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* Bubbly: bigger text, rounder shapes, more space - the easy-to-read one */
+:root[data-skin=bubbly]{--bg:#fff5fa;--card:#fff;--ink:#3b2a4a;--mute:#75658a;--line:#f3c6dd;--accent:#d63a72;--chip:#ffe3f0;--jp:#2a1a3a}
+@media (prefers-color-scheme:dark){:root[data-skin=bubbly]{--bg:#241a2e;--card:#33253f;--ink:#f6ecff;--mute:#c3b2d6;--line:#5a4470;--accent:#ff8fb8;--chip:#45335a;--jp:#fff}}
+[data-skin=bubbly] body{font-size:18px;line-height:1.6;font-family:ui-rounded,"SF Pro Rounded","Nunito","Quicksand","Segoe UI",system-ui,sans-serif}
+[data-skin=bubbly] .card{border-radius:26px;border-width:2px;padding:18px 20px;margin:14px 0;box-shadow:0 4px 0 var(--line)}
+[data-skin=bubbly] .jp{font-size:30px}[data-skin=bubbly] .sub .jp{font-size:23px}
+[data-skin=bubbly] .en{font-size:20px}[data-skin=bubbly] .rom{font-size:17px}[data-skin=bubbly] .note{font-size:16px}
+[data-skin=bubbly] #q{border-radius:99px;border-width:2px;padding:14px 44px 14px 20px;font-size:19px}
+[data-skin=bubbly] nav a{font-size:15px;padding:8px 14px}
+[data-skin=bubbly] .tags span{font-size:13px;padding:4px 12px}
+[data-skin=bubbly] .where,[data-skin=bubbly] .sub .label{font-size:13px}
+[data-skin=bubbly] #tabs button,[data-skin=bubbly] .aibtn,[data-skin=bubbly] #asksend,[data-skin=bubbly] #askq{border-radius:99px}
+[data-skin=bubbly] .ainote{border-radius:22px;font-size:17px}
+/* Retro 96: grey windows, bevelled buttons, teal desktop */
+:root[data-skin=retro]{--bg:#008080;--card:#c0c0c0;--ink:#000;--mute:#3a3a3a;--line:#808080;--accent:#000080;--chip:#dfdfdf;--jp:#000}
+[data-skin=retro] body{font-family:Tahoma,"MS Sans Serif",Verdana,Arial,sans-serif}
+[data-skin=retro] header{background:#c0c0c0;border-bottom:2px solid #000}
+[data-skin=retro] h1{background:linear-gradient(90deg,#000080,#1084d0);color:#fff;margin:0 -16px 8px;padding:5px 10px;font-size:15px}
+[data-skin=retro] h1 span{color:#fff}
+[data-skin=retro] .card,[data-skin=retro] nav a,[data-skin=retro] #tabs button,[data-skin=retro] #skins button,[data-skin=retro] .aibtn,[data-skin=retro] #asksend,[data-skin=retro] .ainote{border-radius:0;border:2px solid;border-color:#fff #404040 #404040 #fff;box-shadow:1px 1px 0 #000;background:#c0c0c0;color:#000}
+[data-skin=retro] #q,[data-skin=retro] #askq{border-radius:0;background:#fff;color:#000;border:2px solid;border-color:#404040 #fff #fff #404040}
+[data-skin=retro] #tabs button.on,[data-skin=retro] #skins button.on{border-color:#404040 #fff #fff #404040;box-shadow:none;background:#dfdfdf;color:#000080;font-weight:700}
+[data-skin=retro] .tags span{border-radius:0;background:#dfdfdf;color:#000;border:1px solid #808080}
+[data-skin=retro] .say{color:#800000}[data-skin=retro] .jp.playing{color:#000080}
+[data-skin=retro] .card.dict{border-style:solid}
+[data-skin=retro] .cat h2,[data-skin=retro] .sec h3,[data-skin=retro] .cat p.blurb,[data-skin=retro] footer,[data-skin=retro] .you,[data-skin=retro] .you::before,[data-skin=retro] .aimeta,[data-skin=retro] .aimeta a,[data-skin=retro] .empty{color:#fff}
+[data-skin=retro] #askbar{background:#c0c0c0;border-top:2px solid #fff}
+[data-skin=retro] .bar{border-radius:0;background:#fff;border:2px solid;border-color:#404040 #fff #fff #404040}[data-skin=retro] .bar i{background:#000080}
+</style><script>try{var k=localStorage.getItem("pj-skin")||"",r=document.documentElement;if(k==="light"||k==="dark")r.setAttribute("data-theme",k);else if(k)r.setAttribute("data-skin",k)}catch(e){}</script></head><body>
+<header><h1>Pocket Japanese <span id="stats"></span><button id="skinbtn" aria-label="Change how the app looks">🎨</button></h1>
+<div id="skins" class="hidden"></div>
 <div class="qwrap"><input id="q" type="text" enterkeyhint="search" placeholder="What do you want to say?" autocomplete="off" autocorrect="off" spellcheck="false"><button id="clear" aria-label="Clear">×</button></div>
 <div id="count"></div><div id="offline"></div><div id="install"></div><nav id="nav"></nav></header>
 <main id="browse"></main><main id="results" class="hidden"></main>
 <footer>Audio: VOICEVOX:No.7 · Tap Japanese text to hear it</footer>
-<script src="lex.js"></script>
+<script src="lex.js" defer onload="window.lexReady&&lexReady()"></script>
 <script>
 const AUDIO_EXT = ".m4a";
 const AUDIO_BASE = "audio/";
@@ -75,10 +110,10 @@ function cardHTML(e,where){
 const STOP=new Set("a an the to i me my you your is are am do does did how what say in of for it this that please can could would want wanna like too japanese japan word phrase".split(" "));
 const stem=w=>w.replace(/'s$/,"").replace(/(ing|ed|es|s)$/,m=>w.length>4?"":m);
 const words=s=>s.toLowerCase().normalize("NFKC").split(/[^a-z0-9぀-ヿ一-鿿]+/).filter(Boolean);
-const ENTRIES=[];let html="",nav="",n=0;
+const ENTRIES=[],CATS=[];let html="",nav="",n=0;
 for(const c of DATA.categories){
   nav+=`<a href="#c${c.id}">${esc(c.title)}</a>`;
-  html+=`<section class="cat" id="c${c.id}"><h2>${esc(c.title)}</h2><p class="blurb">${esc(c.blurb)}</p>`;
+  html+=`<section class="cat" id="c${c.id}">`;const st=html.length;html+=`<h2>${esc(c.title)}</h2><p class="blurb">${esc(c.blurb)}</p>`;
   for(const s of c.sections){
     html+=`<div class="sec">${s.title?`<h3>${esc(s.title)}</h3>`:""}`;
     for(const e of s.entries){
@@ -92,15 +127,25 @@ for(const c of DATA.categories){
       e.en.replace(/\([^)]*\)/g," ").split(/[\/;,]/).map(p=>words(p).filter((w,i,arr)=>!(i===0&&arr.length>1&&["to","a","an","the"].includes(w))).join(" ")).forEach((p,i)=>{if(p&&!f.heads.has(p))f.heads.set(p,i)});
       f.single=!e.romaji.includes(" ")&&!e.jp.includes("〜");
       f.core=c.id==="01";   // survival essentials win ties
-      f.len=words(e.en).length;
+      f.len=words(e.en).length;f.ef=[...f.en,...f.find];
       f.rom=e.romaji.toLowerCase().replace(/[^a-z]/g,"");f.jpx=e.jp;f.kx=e.kana;
       ENTRIES.push({e,f,where:c.title+(s.title?" › "+s.title:"")});
     }
     html+=`</div>`;
   }
-  html+=`</section>`;
+  CATS.push(html.slice(st));html=html.slice(0,st)+`</section>`;
 }
 document.getElementById("browse").innerHTML=html;
+// fill categories: first two now, the rest a few at a time when the phone is idle
+const later=window.requestIdleCallback||(f=>setTimeout(f,30));
+const catEls=[...document.querySelectorAll("#browse .cat")];
+const fillCat=i=>{if(CATS[i]!=null){catEls[i].innerHTML=CATS[i];CATS[i]=null}};
+fillCat(0);fillCat(1);
+let nextCat=2;(function step(){if(nextCat>=catEls.length)return;fillCat(nextCat++);fillCat(nextCat++);later(step)})();
+document.getElementById("nav").addEventListener("click",ev=>{const a=ev.target.closest("a");if(!a)return;
+  const k=catEls.findIndex(x=>"#"+x.id===a.getAttribute("href"));for(let i=0;i<=k;i++)fillCat(i)});
+window.lexReady=()=>later(()=>dictLookup("warmup"));   // build the dictionary index before the first search
+if(window.DICT)window.lexReady();
 document.getElementById("nav").innerHTML=nav;
 document.getElementById("stats").textContent=`· ${n} phrases`;
 function score(f,terms,raw,phrase,exact,syns){
@@ -124,7 +169,7 @@ function score(f,terms,raw,phrase,exact,syns){
     if(f.en.has(t))best=4;
     else if(f.find.has(t))best=3;
     else if(t.length>=4&&f.jp.includes(t))best=3;
-    else if(t.length>=4&&[...f.en,...f.find].some(w=>w.startsWith(t)))best=2;
+    else if(t.length>=4&&f.ef.some(w=>w.startsWith(t)))best=2;
     else if(f.more.has(t))best=1;
     if(!best&&syns[terms.indexOf(t)].some(y=>f.en.has(y)||f.find.has(y)))best=2.5;
     if(best)hit++;s+=best;
@@ -133,10 +178,7 @@ function score(f,terms,raw,phrase,exact,syns){
   return hit?s*(hit/terms.length)**2:0;
 }
 const qEl=document.getElementById("q"),res=document.getElementById("results"),br=document.getElementById("browse"),navEl=document.getElementById("nav"),cnt=document.getElementById("count"),clr=document.getElementById("clear");
-function search(){
-  const raw=qEl.value.trim().toLowerCase().normalize("NFKC");
-  clr.style.display=raw?"block":"none";
-  if(!raw){res.classList.add("hidden");br.classList.remove("hidden");navEl.classList.remove("hidden");cnt.textContent="";return}
+function rank(raw){
   let tw=words(raw).filter(w=>!STOP.has(w));
   if(!tw.length)tw=words(raw);
   const terms=tw.map(stem),SY=window.SYN||{};
@@ -145,6 +187,13 @@ function search(){
   let ranked=ENTRIES.map(x=>[score(x.f,terms,raw.replace(/\s+/g,""),phrase,exact,syns),x]).filter(a=>a[0]>0).sort((a,b)=>b[0]-a[0]);
   const seenCard=new Set();
   ranked=ranked.filter(([,x])=>{const k=x.e.jp+"|"+x.e.en;if(seenCard.has(k))return false;seenCard.add(k);return true}).slice(0,40);
+  return ranked;
+}
+function search(){
+  const raw=qEl.value.trim().toLowerCase().normalize("NFKC");
+  clr.style.display=raw?"block":"none";
+  if(!raw){res.classList.add("hidden");br.classList.remove("hidden");navEl.classList.remove("hidden");cnt.textContent="";return}
+  let ranked=rank(raw);
   br.classList.add("hidden");navEl.classList.add("hidden");res.classList.remove("hidden");
   const strong=ranked.filter(a=>a[0]>=18),rest=ranked.filter(a=>a[0]<18);
   const typed=qEl.value.trim(),hits=strong.length?[]:dictLookup(raw);
@@ -184,7 +233,7 @@ function speak(t){
   if(window.Android&&Android.speak){Android.speak(t);return}
   if(window.speechSynthesis){const u=new SpeechSynthesisUtterance(t);u.lang="ja-JP";u.rate=.9;speechSynthesis.cancel();speechSynthesis.speak(u)}
 }
-qEl.addEventListener("input",search);
+let typeT;qEl.addEventListener("input",()=>{clearTimeout(typeT);typeT=setTimeout(search,40)});
 clr.addEventListener("click",()=>{qEl.value="";search();qEl.focus()});
 // called by the Android app each time it's opened
 window.resetSearch=()=>{qEl.value="";search();window.scrollTo(0,0);qEl.focus()};
@@ -197,6 +246,23 @@ document.addEventListener("click",ev=>{
   player.onended=()=>el.classList.remove("playing");
   player.play().catch(()=>el.classList.remove("playing"));
 });
+// ---------- skins ----------
+const SKINS=[["","Auto"],["light","Light"],["dark","Dark"],["bubbly","Bubbly (big & easy)"],["retro","Retro 96"]];
+const skinsEl=document.getElementById("skins");
+skinsEl.innerHTML=SKINS.map(([k,n])=>`<button data-k="${k}">${n}</button>`).join("");
+function setSkin(k,save){
+  const r=document.documentElement;r.removeAttribute("data-theme");r.removeAttribute("data-skin");
+  if(k==="light"||k==="dark")r.setAttribute("data-theme",k);else if(k)r.setAttribute("data-skin",k);
+  if(save)try{localStorage.setItem("pj-skin",k)}catch(e){}
+  const bar=k==="retro"?"#c0c0c0":getComputedStyle(r).getPropertyValue("--bg").trim();
+  document.querySelectorAll("meta[name=theme-color]").forEach(m=>{m.dataset.o=m.dataset.o||m.content;m.content=k?bar:m.dataset.o});
+  if(window.Android&&Android.setBg)Android.setBg(bar);
+  skinsEl.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.k===k));
+}
+let skinNow="";try{skinNow=localStorage.getItem("pj-skin")||""}catch(e){}
+setSkin(SKINS.some(x=>x[0]===skinNow)?skinNow:"",false);
+document.getElementById("skinbtn").addEventListener("click",()=>skinsEl.classList.toggle("hidden"));
+skinsEl.addEventListener("click",ev=>{const b=ev.target.closest("button");if(b)setSkin(b.dataset.k,true)});
 qEl.focus();
 
 // ---------- offline web app ----------
