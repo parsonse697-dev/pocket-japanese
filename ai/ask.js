@@ -14,11 +14,120 @@ const IOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
 const MODELS={
   small:{id:"Qwen3.5-2B-q4f16_1-MLC",lib:"ai/Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm",size:"1.1 GB"},
   big:{id:"Qwen3.5-4B-q4f16_1-MLC",lib:"ai/Qwen3.5-4B-q4f16_1_cs1k-webgpu.wasm",size:"2.4 GB"}};
+// ---------- pattern + word ("FILL") ----------
+// Hand-picked patterns from the phrasebook whose gap takes a plain thing or place.
+// The AI names a pattern letter and an ENGLISH word; the app finds the Japanese
+// word in the cards/dictionary and joins them. The AI writes no Japanese here.
+const PATTERNS=[
+  ["〜はありますか","Do you have ___? / Is there ___?"],
+  ["〜はどこですか","Where is ___?"],
+  ["〜を探しています","I'm looking for ___"],
+  ["〜をお願いします","___, please"],
+  ["〜がほしいです","I want ___"],
+  ["〜抜きでお願いします","Without ___, please"],
+  ["〜が食べられません","I can't eat ___"],
+  ["〜は入っていますか","Does this contain ___?"],
+  ["〜アレルギーがあります","I'm allergic to ___"],
+  ["〜に効く薬はありますか","Do you have medicine for ___?"],
+  ["近くに〜はありますか","Is there a ___ nearby?"],
+  ["〜に行きたいんですが","I'd like to go to ___ (how do I get there?)"],
+  ["〜までどうやって行けばいいですか","How do I get to ___?"],
+  ["〜までお願いします","To ___, please (taxi)"],
+  ["〜までいくらですか","How much is it to ___?"],
+  ["このバスは〜に行きますか","Does this bus go to ___?"],
+  ["この電車は〜に止まりますか","Does this train stop at ___?"],
+  ["〜って何ですか","What is ___?"]];
+const PLIST=PATTERNS.map((p,i)=>String.fromCharCode(65+i)+") "+p[1]).join("\n");
+const FILL_RULES=`SENTENCE PATTERNS (hand-written, always correct):
+${PLIST}
+
+FILL <letter> <English word> -> use when the user wants exactly one of these patterns with a specific thing or place in the gap. Write the word in ENGLISH; the app finds the Japanese. Examples: "do you have a blanket" -> FILL A blanket. "does this bus go to Kyoto station" -> FILL P Kyoto station. Only for things and places, never for actions.`;
+const isNounJP=jp=>!!tok&&!/[〜~\/\s]/.test(jp)&&tok.tokenize(jp).every(t=>t.pos==="名詞"||t.pos==="接頭詞");
+// hand-written cards win over the dictionary, for the plural form as well ("onions" -> the 玉ねぎ card)
+function findNoun(w){
+  const forms=[...new Set([w,w.trim().replace(/(es|s)$/,""),w.trim().replace(/s$/,"")])].filter(Boolean);
+  for(const f of forms){const n=findNoun1(f,"card");if(n)return n}
+  for(const f of forms){const n=findNoun1(f,"dict");if(n)return n}
+  return null;
+}
+function findNoun1(w,only){
+  w=w.toLowerCase().normalize("NFKC").replace(/[.?!"“”]/g,"").trim().replace(/^(a|an|the|some|any|my|your|this|that) /,"");
+  if(!w||w.startsWith("to "))return null;   // "to go", "to eat": actions don't fit these patterns
+  const r=only==="dict"?null:rank(w).find(a=>a[0]>=18&&a[1].f.single&&isNounJP(a[1].e.jp));
+  if(r)return{jp:r[1].e.jp,kana:r[1].e.kana,en:r[1].e.en,kind:"card"};
+  if(only==="card")return null;
+  // dictionary: prefer the everyday native word over a katakana loanword (玉ねぎ before オニオン)
+  const ds=dictLookup(w).filter(d=>d[5]&&isNounJP(d[0])),d=ds.find(d=>!/^[ァ-ヶー]+$/.test(d[0]))||ds[0];
+  if(d)return{jp:d[0],kana:d[1],en:d[4].split(/[\/;]/)[0].trim(),kind:"dictionary"};
+  // two words like "kyoto station": try the pieces as one Japanese compound (京都 + 駅)
+  const ps=w.split(" ");
+  // only when the result is a known word, or a place name + 駅 (station)
+  if(ps.length===2){const a=findNoun1(ps[0]),b=findNoun1(ps[1]);
+    if(a&&b){const j=a.jp+b.jp;vocab();
+      if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&tok.tokenize(a.jp).every(t=>t.pos_detail_2==="地域"||t.pos_detail_1==="固有名詞")))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
+  return null;
+}
+function fillHTML(letter,word){
+  const p=PATTERNS[letter.toUpperCase().charCodeAt(0)-65];if(!p)return null;
+  word=word.replace(/\s*[=＝(（].*$/,"").trim();if(!tok||!word||/[ぁ-ヿ一-鿿]/.test(word))return null;   // no word checker, no sentence
+  const n=findNoun(word),label=`<div class="where">Built by the app: a hand-written pattern + a ${n?n.kind:""} word · the whole sentence was not checked by a person</div>`;
+  const en=esc(p[1].split("___").join(word));
+  const base=ENTRIES.find(x=>x.e.jp===p[0]);if(!base)return null;
+  if(n){
+    // reading comes from the card/dictionary and the hand-written pattern: nothing is guessed
+    const wr=romaji(n.kana);if(wr==null)return null;
+    fillHTML.last=p[0].replace("〜",n.jp);
+    return`<div class="card dict">${label}${ttsBlock(p[0].replace("〜",n.jp),base.e.romaji.replace("~",wr),"")}<div class="en">${en}</div><div class="note">Word used: <span lang="ja">${esc(n.jp)}</span> (${esc(wr)}) = ${esc(n.en)}</div><div class="tags"><span>pattern + word</span></div></div>`;
+  }
+  // not in the cards or dictionary: names and brands are said as they are
+  // only for real names ("Nutella", "Tokyo Dome"): capitalised, and unknown to both the cards and the dictionary
+  if(!/^[A-Z0-9][A-Za-z0-9'&.-]*( [A-Z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(word)||dictLookup(word.toLowerCase()).length||rank(word.toLowerCase()).some(a=>a[0]>=18))return null;
+  fillHTML.last=p[0].replace("〜",word);
+  return`<div class="card dict"><div class="where">Built by the app: a hand-written pattern + your word as it is</div>${ttsBlock(p[0].replace("〜",word),base.e.romaji.replace("~",word),"")}<div class="en">${en}</div><div class="note">“${esc(word)}” is not in the dictionary. Names, brands and borrowed words are usually said as they are, with a Japanese accent.</div><div class="tags"><span>pattern + word</span></div></div>`;
+}
+
+// ---------- sentence builder without any AI ----------
+// Common question shapes are recognised from the English itself and mapped to a
+// hand-written pattern. First matching rule wins, so specific shapes come first.
+const RULES=[
+  ["K",/\bis there (?:an? |any )?(.+?) (?:near(?:by)?|around|close)\b/i],["K",/\b(?:nearest|closest) (.+)/i],
+  ["I",/\ballerg(?:ic|y) to (.+)/i],["I",/\b([a-z]+) allergy\b/i],
+  ["J",/\b(?:medicine|something|anything|pills?|tablets?) for (?:an? |my |the )?(.+)/i],
+  ["F",/\bwithout (?:the |any )?(.+)/i],["F",/\b(?:hold|skip|leave out|remove) the (.+)/i],
+  ["G",/\b(?:can'?t|cannot|don'?t|do not|doesn'?t|does not) eat (.+)/i],
+  ["H",/\bdoes (?:this|it|that) (?:contain|have|include) (?:any )?(.+)/i],["H",/\b(?:is|are) there (?:any )?(.+?) in (?:this|it|that|here)\b/i],
+  ["P",/\b(?:does|is|will) (?:this|the|that) bus (?:go|going|stop|stopping) (?:to|at) (.+)/i],
+  ["Q",/\b(?:does|is|will) (?:this|the|that) train (?:stop|stopping|go|going) (?:at|to|in) (.+)/i],
+  ["O",/\bhow much (?:is it |does it cost |is the fare |is a ticket )?to (?:get to |go to )?(.+)/i],
+  ["M",/\bhow (?:do|can|should) (?:i|we) get to (.+)/i],["M",/\b(?:how to get|directions|the way) to (.+)/i],
+  ["N",/\b(?:take|drive) (?:me|us) to (.+)/i],
+  ["L",/\b(?:i|we) (?:want|wanna|need|would like|'d like) to go to (.+)/i],
+  ["C",/\blooking for (?:an? |the |some |my )?(.+)/i],
+  ["B",/\bwhere(?:'s| is| are| can i find| do i find) (?:the |an? |my )?(.+)/i],
+  ["A",/\b(?:do|does|did) (?:you|they|this (?:store|shop|place)|the (?:store|shop|hotel)) (?:have|sell|carry) (?:an? |any |some |the )?(.+)/i],
+  ["A",/\bis there (?:an? |any )?(.+)/i],
+  ["D",/\b(?:can|could|may) (?:i|we) (?:have|get) (?:an? |some |the |another )?(.+)/i],
+  ["D",/\b(?:i|we)(?:'d| would) like (?:an? |some |the |another )?(.+)/i],
+  ["E",/\b(?:i|we) want (?:an? |some |the |another )?(.+)/i]];
+function ruleFill(q){
+  const s=q.trim().replace(/[?!.]+$/,"")
+    .replace(/^(?:how (?:do|can|would|should) (?:i|you|we) (?:say|ask)|how to (?:say|ask)|what(?:'s| is) the japanese for|how do you say)\s*(?:if|whether|for|that|:)?\s*/i,"")
+    .replace(/^["“']|["”']$/g,"").replace(/\s+in japanese$/i,"");
+  for(const[L,re]of RULES){
+    const m=re.exec(s);if(!m)continue;
+    const w=m[1].replace(/[,.]? please$/i,"").replace(/\s+(?:here|around here|near here|nearby|for me|today|now|right now)$/i,"").replace(/["”']$/,"").trim();
+    if(!w||/^to /i.test(w)||w.split(" ").length>3)return null;
+    return fillHTML(L,w);
+  }
+  return null;
+}
+
 const SYSTEM=`You are the helper inside "Pocket Japanese", an offline phrasebook for an English-speaking traveller in Japan who cannot read Japanese.
 Each message gives you PHRASEBOOK ENTRIES (checked by humans, always correct) and a QUESTION.
 
-Reply using ONLY these three kinds of lines:
+Reply using ONLY these four kinds of lines:
 CARD <number>
+FILL <letter> <English word>
 SAY <Japanese sentence> = <English meaning>
 NOTE <one or two short English sentences>
 
@@ -27,7 +136,8 @@ How to choose:
 - Check who is speaking: some entries are what YOU say, others are replies to someone else (read the English and the note). Pick the one that fits the user's situation.
 - Entries marked "dictionary word" are single words, not phrases.
 - NOTE lines must be in English.
-- Write a SAY line only when no entry says it. Make one short, natural, polite sentence (desu/masu style) the way a Japanese person would really say it. Use the words from the entries when they fit. Write it in normal Japanese script only.
+- If no entry says it but a SENTENCE PATTERN below fits, use FILL. It is safer than SAY.
+- Write a SAY line only when no entry says it and no pattern fits. Make one short, natural, polite sentence (desu/masu style) the way a Japanese person would really say it. Use the words from the entries when they fit. Write it in normal Japanese script only.
 - Add a NOTE line when a tip helps (when to use it, politeness, a warning).
 
 Strict rules:
@@ -36,7 +146,9 @@ Strict rules:
 - Do not copy an entry into a SAY line. Use CARD for entries.
 - If the question is not about Japanese or travelling in Japan, write: NOTE I can only help with Japanese.
 - Keep it short: at most 4 lines in total. Never repeat a line.
-- No greetings, no extra text, nothing outside the three line types.`;
+- No greetings, no extra text, nothing outside the four line types.
+
+${FILL_RULES}`;
 
 // The on-device model is too small to write Japanese safely (in testing it produced
 // fluent-looking nonsense that passes a word check), so offline it may only point
@@ -52,7 +164,7 @@ Rules:
 - Choose the entry that says what the USER wants to say. Put the best one first. Use 1 or 2 CARD lines.
 - Check who is speaking: some entries are what you say, others are replies to someone else.
 - Never write Japanese yourself. Never write romaji.
-- If no entry fits, write only: NOTE None of my cards say that exactly.
+- If nothing fits, write only: NOTE None of my cards say that exactly.
 - Nothing else. No explanations outside NOTE.`;
 
 // ---------- page furniture ----------
@@ -198,14 +310,15 @@ function loadTokenizer(){
     document.head.appendChild(s)});
 }
 const ensureTok=()=>tokP=tokP||loadTokenizer().then(t=>{tok=t}).catch(()=>{tokP=null});
-const usable=()=>!!gKey()||localState==="ready";
+const usable=()=>true;   // works with no AI at all (cards + pattern builder); AI adds to it
 function drawPanel(){
   const key=gKey();
   const on=key?"Online AI ✓":"Online AI: not set up";
   const off={ready:"Offline AI ✓",loading:`Offline AI ${localFresh?"downloading":"starting"} <span class="aipct"></span>`,absent:"Offline AI: not downloaded",
     none:"Offline AI: not supported here",error:"Offline AI: problem",unknown:"Offline AI: checking",checking:"Offline AI: checking"}[localState];
-  let h=`<div class="aimeta">${on} · ${off} · <a href="#" id="aiset">${showSettings||!usable()?"":"settings"}</a></div>`;
-  if(showSettings||!usable()){
+  let h=`<div class="aimeta">${on} · ${off} · <a href="#" id="aiset">${showSettings?"hide settings":"AI settings"}</a></div>`;
+  if(!gKey()&&localState!=="ready"&&!showSettings)h+=`<div class="aimeta">No AI is connected, and it still works: I find the closest hand-written cards and build simple sentences from hand-written patterns. Connect an AI in settings for more.</div>`;
+  if(showSettings){
     h+=`<div class="card"><div class="en">Online AI (best answers)</div>
 <div class="note">Uses Google's Gemini over the internet. It is far better at Japanese than the offline one.<br>
 It needs your own API key, free from <b>aistudio.google.com/apikey</b>. The key is saved on this device only. Your questions are sent to Google.</div>`;
@@ -371,8 +484,8 @@ function check(jp){
 }
 
 // ---------- chat ----------
-function render(text,items,allowSay){
-  let html="",shown=0,cards=0,notes=0,says=0,bads=0;const usedJP=new Set(),seenLine=new Set();
+function render(text,items,allowSay,already){
+  let html="",shown=0,cards=0,notes=0,says=0,bads=0;const usedJP=new Set(already||[]),seenLine=new Set();
   for(let line of text.split(/\n+/)){
     line=line.trim().replace(/^[-*•]\s*/,"");
     if(seenLine.has(line))continue;seenLine.add(line);   // small models loop: ignore repeats
@@ -386,6 +499,11 @@ function render(text,items,allowSay){
           html+=card?cardHTML(card.e,card.where):dictCard(it.o,null)}
       }
       line=m[2];if(!line)continue;   // models often put "Japanese = English" on the same line
+    }
+    if((m=/^FILL\s*[:\-]?\s*[\[(]?([A-Za-z])[\])]?[\s,:\-]+(.+)$/i.exec(line))){
+      const f=says<2?fillHTML(m[1],m[2]):null;
+      if(f&&!usedJP.has(fillHTML.last)){usedJP.add(fillHTML.last);says++;shown++;html+=f}
+      continue;
     }
     if((m=/^NOTE\s*[:：]?\s*(.+)$/i.exec(line))){
       if(/[぀-ヿ㐀-鿿가-힯]/.test(m[1]))continue;   // not plain English (or drifted into Chinese)
@@ -414,7 +532,7 @@ function render(text,items,allowSay){
   return html;
 }
 async function send(q){
-  if(busy||!q.trim()||!usable())return;
+  if(busy||!q.trim())return;
   busy=true;aq.value="";
   const you=document.createElement("div");you.className="you";you.textContent=q;log.appendChild(you);
   const out=document.createElement("div");out.innerHTML=`<div class="ainote dots">Looking it up</div>`;log.appendChild(out);
@@ -426,33 +544,35 @@ async function send(q){
     history.slice(-2).forEach(h=>msgs.push({role:"user",content:"QUESTION: "+h.q},{role:"assistant",content:h.a}));
     msgs.push({role:"user",content:`PHRASEBOOK ENTRIES:\n${ctx}\n\nQUESTION: ${q}`});
     await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,8000))]);
+    fillHTML.last=null;
+    const built=ruleFill(q)||"",already=built&&fillHTML.last?[fillHTML.last]:[];
+    if(built)out.innerHTML=built+`<div class="ainote dots">Checking for more</div>`;
     // online first; the on-device model takes over if Gemini can't answer
     let text=null,by="",gErr=null;
     if(gKey()){
       if(navigator.onLine===false)gErr=new Error("offline");
       else try{text=await gAsk(msgs);by="Gemini ("+gModel()+")"}catch(e){gErr=e}
     }
+    if(text==null&&localState==="ready"){text=await localAsk(msgs);by="the offline AI"+(gErr?" · Gemini wasn't used because "+gWhy(gErr):"")}
     if(text==null){
-      if(localState==="ready"){text=await localAsk(msgs);by="the offline AI"+(gErr?" · Gemini wasn't used because "+gWhy(gErr):"")}
-      else{
-        // no AI available right now: fall back to the closest hand-written cards
-        const cards=items.filter(it=>it.kind!=="dict").slice(0,2);
-        out.innerHTML=`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr&&gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}. ${
-          cards.length?"Here are the closest hand-written cards instead.":"I found no matching cards either; try the Search tab."}${
-          localState==="loading"?" The offline AI is still getting ready.":""}</div>`+
-          cards.map(it=>{const c=itemCard(it);return cardHTML(c.e,c.where)}).join("");
-        busy=false;return;
-      }
+      // no AI available right now: the closest hand-written cards
+      const cards=items.filter(it=>it.kind!=="dict").slice(0,built?1:2);
+      out.innerHTML=built+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.${localState==="loading"?" The offline AI is still getting ready.":""}</div>`:"")+
+        (cards.length?`<div class="aimeta">Closest hand-written card${cards.length>1?"s":""}:</div>`+cards.map(it=>{const c=itemCard(it);return(it.kind==="sent"?`<div class="aimeta">Found on this card: <b lang="ja">${esc(it.o.b.jp)}</b> = ${esc(it.o.b.en)}</div>`:"")+cardHTML(c.e,c.where)}).join("")
+          :built?"":`<div class="ainote">I found no matching cards. Try other words, or the Search tab.</div>`);
+      window.__lastAI={q,ctx,text:null,by:"no AI"};
+      busy=false;return;
     }
     window.__lastAI={q,ctx,text,by};
     history.push({q,a:text});history=history.slice(-2);
-    out.innerHTML=render(text,items,by.startsWith("Gemini"))+`<div class="aimeta">Answered by ${esc(by)}</div>`;
+    {const r=render(text,items,by.startsWith("Gemini"),already);out.innerHTML=built+(built&&/I'm not sure how to help/.test(r)?"":r)}
+    out.innerHTML+=`<div class="aimeta">Answered by ${esc(by)}</div>`;
   }catch(e){
     out.innerHTML=`<div class="ainote">The AI stopped unexpectedly (${esc(String(e&&e.message||e)).slice(0,120)}). Try again.</div>`;
   }
   busy=false;
 }
 bar.addEventListener("submit",ev=>{ev.preventDefault();send(aq.value)});
-window.__ask={retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
+window.__ask={ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
   setLocal:s=>{localState=s},setEngine:(e,t)=>{engine=e;localState=e?"ready":localState;if(t)tok=t},state:()=>({localState,localPct,key:!!gKey(),model:gModel(),tok:!!tok}),clear:()=>{history=[]}};
 })();

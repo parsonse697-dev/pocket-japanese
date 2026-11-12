@@ -319,7 +319,7 @@ qEl.focus();
     inst.innerHTML='To install: tap <b>Share</b> <span aria-hidden="true">⎋</span> then <b>Add to Home Screen</b>. It then works with no internet.';
     inst.style.display="block";
   }
-  if(!("serviceWorker" in navigator)||location.protocol==="file:")return;
+  if(!("serviceWorker" in navigator)||location.protocol==="file:"||location.search.includes("nosw"))return;   // ?nosw = testing without the offline cache
   navigator.serviceWorker.register("sw.js");
   const msg=document.getElementById("offline");
   const ids=new Set();
