@@ -1,6 +1,6 @@
 // Offline support. The page is cached as a versioned "core"; sound clips
 // live in a separate cache keyed by content, so updates don't re-download them.
-const CORE = "pj-core-354baf8845";
+const CORE = "pj-core-7006b2e9f1";
 const AI = "pj-ai-e5812ed5d1";   // AI helper files, renamed whenever one of them changes
 const FILES = ["./", "index.html", "lex.js", "ai/ask.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon.png"];
 self.addEventListener("install", e => {

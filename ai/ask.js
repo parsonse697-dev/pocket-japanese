@@ -279,6 +279,13 @@ async function localInit(){
   if(!navigator.gpu){localState="none";return drawPanel()}
   localState="checking";
   try{
+    // The model has one 254 MB block of numbers. Many phone graphics chips only allow
+    // 128 MB blocks; on those it crashes mid-answer, so it is never offered there.
+    const ad=await navigator.gpu.requestAdapter();
+    if(!ad||ad.limits.maxStorageBufferBindingSize<2.6e8){
+      try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
+      LS.set("pj-ai-model",null);localState="weak";return drawPanel();
+    }
     WL=await import(absURL("ai/web-llm.js"));
     model=await pickModel();
     if(await WL.hasModelInCache(model.id,cfg()))return localLoad(false);
@@ -323,7 +330,7 @@ function drawPanel(){
   const key=gKey();
   const on=key?"Online AI ✓":"Online AI: not set up";
   const off={ready:"Offline AI ✓",loading:`Offline AI ${localFresh?"downloading":"starting"} <span class="aipct"></span>`,absent:"Offline AI: not downloaded",
-    none:"Offline AI: not supported here",error:"Offline AI: problem",unknown:"Offline AI: checking",checking:"Offline AI: checking"}[localState];
+    none:"Offline AI: not supported here",weak:"Offline AI: this device can't run it",error:"Offline AI: problem",unknown:"Offline AI: checking",checking:"Offline AI: checking"}[localState];
   let h=`<div class="aimeta">${on} · ${off} · <a href="#" id="aiset">${showSettings?"hide settings":"AI settings"}</a></div>`;
   if(!gKey()&&localState!=="ready"&&!showSettings)h+=`<div class="aimeta">No AI is connected, and it still works: I find the closest hand-written cards and build simple sentences from hand-written patterns. Connect an AI in settings for more.</div>`;
   if(showSettings){
@@ -342,6 +349,7 @@ It needs your own API key, free from <b>aistudio.google.com/apikey</b>. The key 
     else if(localState==="loading")h+=`<div class="bar"><i></i></div><div class="note">${localFresh?"Downloading":"Starting"} · <span class="aipct"></span>${localFresh?"<br>Keep the app open. If it stops, come back and it continues.":""}</div>`;
     else if(localState==="ready")h+=`<div class="note">Ready (${model.size} on this device).</div><div style="margin-top:10px"><button class="aibtn plain" id="aidel">Delete from device</button></div>`;
     else if(localState==="none")h+=`<div class="note">This browser can't run it (on iPhone it needs iOS 26 or later).</div>`;
+    else if(localState==="weak")h+=`<div class="note">This device's graphics chip can't hold the model, so it isn't offered here. Nothing is stored for it. Everything else in this tab works without it.</div>`;
     else if(localState==="error")h+=`<div class="note">${esc(localErr).slice(0,240)}<br>This usually means the device ran out of memory or the download was interrupted. What was downloaded is kept.</div><div style="margin-top:10px"><button class="aibtn plain" id="aidl">Try again</button></div>`;
     h+=`</div>`;
   }
@@ -561,7 +569,13 @@ async function send(q){
       if(navigator.onLine===false)gErr=new Error("offline");
       else try{text=await gAsk(msgs);by="Gemini ("+gModel()+")"}catch(e){gErr=e}
     }
-    if(text==null&&localState==="ready"){text=await localAsk(msgs);by="the offline AI"+(gErr?" · Gemini wasn't used because "+gWhy(gErr):"")}
+    if(text==null&&localState==="ready"){
+      try{text=await localAsk(msgs);by="the offline AI"+(gErr?" · Gemini wasn't used because "+gWhy(gErr):"")}
+      catch(e){   // the model broke: switch it off and answer from the cards instead
+        text=null;localErr=String(e&&e.message||e);localState="error";
+        try{engine&&engine.unload()}catch(x){}engine=null;drawPanel();
+      }
+    }
     if(text==null){
       // no AI available right now: the closest hand-written cards
       const cards=items.filter(it=>it.kind!=="dict").slice(0,built?1:2);
