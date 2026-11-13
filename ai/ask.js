@@ -223,7 +223,7 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
   stay:"泊まる",touch:"触る","try on":"試着",order:"注文",reserve:"予約",book:"予約",cancel:"キャンセル",check:"確認",confirm:"確認",charge:"充電",exchange:"交換",call:"電話",phone:"電話",
   "wake up":"起きる","get up":"起きる",sell:"売る",cook:"料理",drive:"運転",travel:"旅行",shop:"買い物","go shopping":"買い物",smoke:"吸う",throw:"捨てる","throw away":"捨てる",
   push:"押す",press:"押す",pull:"引く",stop:"止まる",hurry:"急ぐ",ask:"聞く",answer:"答える",practice:"練習",explain:"説明",translate:"翻訳",repeat:"繰り返す",bring:"持ってくる|持って来る",
-  "pick up":"拾う",kick:"蹴る",punch:"殴る",hit:"叩く",fight:"戦う",steal:"盗む",bite:"噛む",catch:"捕まえる",chase:"追いかける",break:"壊す",hug:"抱きしめる",kiss:"キス",kill:"殺す",scare:"驚かす",
+  "pick up":"拾う",kick:"蹴る",sting:"刺す",punch:"殴る",hit:"叩く",fight:"戦う",steal:"盗む",bite:"噛む",catch:"捕まえる",chase:"追いかける",break:"壊す",hug:"抱きしめる",kiss:"キス",kill:"殺す",scare:"驚かす",
   search:"探す","look for":"探す","search for":"探す",die:"死ぬ",laugh:"笑う",cry:"泣く",dance:"踊る",fly:"飛ぶ",win:"勝つ",lose2:"負ける",join:"参加",clean:"掃除",fix:"直す",repair:"直す",
   "take a photo":"撮る","take a picture":"撮る","take photos":"撮る","take pictures":"撮る","take a shower":"浴びる","take a bath":"入る","take a break":"休む","take a rest":"休む"}};
 const FIXOBJ={"take a photo":"写真","take a picture":"写真","take photos":"写真","take pictures":"写真","take a shower":"シャワー","take a bath":"お風呂|風呂"};
@@ -336,7 +336,17 @@ function vstems(w){
   return null;
 }
 // polite endings; each entry is the list of spoken words that follow the stem
+// passive ("got bitten"): regular for every verb class
+function passive(w){
+  const s=vstems(w);if(!s)return null;const p=w.pos;
+  if(/vs-i/.test(p))return[w.jp.slice(0,-2)+"され",w.kana.slice(0,-2)+"され"];
+  if(/(^|,)vk/.test(p))return[s.a[0]+"られ",s.a[1]+"られ"];
+  if(/(^|,)v1/.test(p))return[s.i[0]+"られ",s.i[1]+"られ"];
+  if(s.suru)return[w.jp+"され",w.kana+"され"];
+  return s.a?[s.a[0]+"れ",s.a[1]+"れ"]:null;
+}
 function vend(w,f){
+  if(f==="ukemi"||f==="ukemiteiru"){const P=passive(w);if(!P)return null;return f==="ukemi"?[C(P[0]+"ました",P[1]+"ました")]:[C(P[0]+"て",P[1]+"て"),C("います")]}
   const s=vstems(w);if(!s)return null;
   const J=(a,x)=>a?C(a[0]+x,a[1]+x):null,ok=a=>a.every(Boolean)?a:null;
   const pot=NOPOT.has(w.jp)?s.i:s.pot;
@@ -357,7 +367,7 @@ function vend(w,f){
   }
   return null;
 }
-const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch",stole:"steal",bit:"bite",fought:"fight",hit:"hit",kicked:"kick",chased:"chase",hugged:"hug"};
+const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch",stole:"steal",stung:"sting",bit:"bite",fought:"fight",hit:"hit",kicked:"kick",chased:"chase",hugged:"hug"};
 function enVerb(w){
   if(IRR[w]&&w!=="cut"&&w!=="read")return{c:[IRR[w]],past:true};
   if(/ing$/.test(w)&&w.length>4){const b=w.slice(0,-3);return{c:[b,b+"e",b.replace(/(.)\1$/,"$1")],ing:true}}
@@ -387,7 +397,8 @@ function VP(s){
   }
   if(!v||!vstems(v))return null;
   used.push(v);
-  let rest=ws.slice(nv).join(" ").replace(/^(me|us|you)( |$)/i,"").trim();
+  let rest=ws.slice(nv).join(" ");const me=/^(me|us)( |$)/i.test(rest);
+  rest=rest.replace(/^(me|us|you)( |$)/i,"").trim();
   const mv=/^(行く|来る|帰る|戻る)$/.test(v.jp);
   // "here" / "there": where it happens
   const pm=/(?:^| )(over there|here|there)$/i.exec(rest);
@@ -421,7 +432,7 @@ function VP(s){
       }
     }
   }
-  return{v,pre,used,past:!!info.past,ing:!!info.ing};
+  return{v,pre,used,past:!!info.past,ing:!!info.ing,me};
 }
 // ----- whole sentences -----
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
@@ -485,7 +496,7 @@ function compose(q){
       return{chunks:[...ch,...p],used:[a]};
     }
     if(adv||mode)return null;
-    if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);if(vp&&vp.ing){const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e&&!neg&&!past)return{chunks:[...vp.pre,...e],used:vp.used}}return null}
+    if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);if(vp&&vp.ing&&!vp.me){const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e&&!neg&&!past)return{chunks:[...vp.pre,...e],used:vp.used}}return null}
     const np=NP(t);if(!np||np.pron==="i")return null;
     return{chunks:[...np.chunks,...(neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")])],used:np.used};
   };
@@ -516,7 +527,7 @@ function compose(q){
       const looks=/^(look|seem)/i.test(m[2]),P=pred(m[4],S,!!m[3],/^w/i.test(m[2]),looks?"looks":null);
       if(P)return out([...S.chunks,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[],true);
     }
-    if(!/^(i|we|you) (am|are) [a-z]+ing\b/i.test(l))return null;
+    if(!/^(i|we|you) (am|are) [a-z]+ing\b/i.test(l)&&!/^[a-z]+ing\b/i.test(m[4]))return null;
   }
   // --- fixed shapes with a thing ---
   const thing=(re,build)=>{const mm=re.exec(l);if(!mm)return undefined;const np=NP(s.slice(s.length-mm[1].length));return np&&!/^(i|he|she|we)$/.test(np.pron||"")?build(np):null};
@@ -602,6 +613,16 @@ function compose(q){
      const am=/^(is|are|was|were) /i.exec(rest);if(am){if(!/^[a-z]+ing\b/i.test(rest.slice(am[0].length)))continue;ing=true;rest=rest.slice(am[0].length)}
      const np=NP(s.slice(0,head.length));if(!np||np.pron)continue;
      const vp=VP(rest);if(!vp||vp.ing!==ing)continue;
+     // "the dog bit me": Japanese says "I was bitten by the dog" (犬に噛まれました), not 私を
+     if(vp.me){
+       // only real "do it to someone" verbs (JMdict vt), and not する-nouns (電話されました sounds stiff)
+       if(!vp.past&&!ing||!/(^|,)vt/.test(vp.v.pos)||/(^|,)vs(,|$)/.test(vp.v.pos)||vp.pre.some(ch=>ch[0]==="を"))continue;
+       let v=vp.v;
+       if(v.kana==="かく")continue;   // a cat "scratching" you is 引っかく, which the dictionary here lacks: not built
+       if(v.jp==="噛む"&&/^(蚊|蜂|ハチ|虫)$/.test(np.used[np.used.length-1].jp)){const st=byJP("刺す","v");if(!st)continue;v=st;vp.used[vp.used.indexOf(vp.v)]=st}   // mosquitoes and bees "sting"
+       const e=vend(v,ing?"ukemiteiru":"ukemi");if(!e)continue;
+       return out([...np.chunks,C("に"),...vp.pre,...e],[...np.used,...vp.used],["Japanese says this as “I got … by …” rather than using a word for “me”."]);
+     }
      const f=ing?(/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru"):vp.past?"mashita":"masu";
      const e=vend(vp.v,f);if(!e)continue;
      return out([...np.chunks,GA,...vp.pre,...e],[...np.used,...vp.used]);
