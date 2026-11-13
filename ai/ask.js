@@ -256,11 +256,19 @@ async function localAsk(msgs){
   const r=await engine.chat.completions.create(Object.assign({messages:[{role:"system",content:SYSTEM_LOCAL},...msgs.slice(1)],temperature:0.2,top_p:0.8,presence_penalty:1.5,max_tokens:90,extra_body:{enable_thinking:false}},window.__askParams||{}));
   return(r.choices[0].message.content||"").replace(/<think>[\s\S]*?(<\/think>|$)/g,"").trim();
 }
+// Phones and tablets always get the small model: the large one needs about 4 GB of
+// graphics memory and froze an 8 GB phone. The large one is for computers only.
+const MOBILE=IOS||/android|mobile/i.test(navigator.userAgent);
 async function pickModel(){
-  const saved=LS.get("pj-ai-model");if(saved&&MODELS[saved])return MODELS[saved];
+  let saved=LS.get("pj-ai-model");
+  if(saved==="big"&&MOBILE){   // downloaded by an earlier version: remove it
+    try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
+    LS.set("pj-ai-model",null);saved=null;
+  }
+  if(saved&&MODELS[saved])return MODELS[saved];
   let k="small";
   try{const est=await navigator.storage.estimate();
-    if(!IOS&&(navigator.deviceMemory||4)>=8&&est.quota-est.usage>5e9)k="big"}catch(e){}
+    if(!MOBILE&&(navigator.deviceMemory||4)>=8&&est.quota-est.usage>5e9)k="big"}catch(e){}
   return MODELS[k];
 }
 const cfg=()=>{const rec=WL.prebuiltAppConfig.model_list.find(m=>m.model_id===model.id);return{model_list:[{...rec,model_lib:absURL(model.lib)}]}};
