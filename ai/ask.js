@@ -80,7 +80,12 @@ function findNoun1(w,only){
   // only when the result is a known word, or a place name + 駅 (station)
   if(ps.length===2){const a=findNoun(ps[0]),b=findNoun(ps[1]);
     if(a&&b){const j=a.jp+b.jp;vocab();
-      if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&isPlace(a.jp)))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
+      // a place name + a landmark word is one name: 東京タワー, 大阪城, 京都駅, 成田空港
+      if(VOCAB.has(j)||CORPUS.includes(j)||(/^(駅|タワー|城|空港|公園|大学|神社|港|動物園|水族館|美術館|博物館|温泉|山|川|湖|島)$/.test(b.jp)&&isPlace(a.jp)))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"};
+      const P=window.PICK||{};
+      if(!isPlace(a.jp)&&!isPlace(b.jp)&&P[ps[0]]!=null&&P[ps[1].replace(/s$/,"")]!=null||P[ps[1]]!=null&&P[ps[0]]!=null){
+        if(!(window.PICKA&&window.PICKA[ps[0]]!=null)&&!PREF.adj[ps[0]]&&romaji(a.kana)&&romaji(b.kana))
+          return{jp:a.jp+"の"+b.jp,kana:a.kana+"の"+b.kana,parts:[[a.jp,a.kana],["の","の"],[b.jp,b.kana]],en:w+" (the "+ps[0]+"'s "+ps[1]+")",kind:"dictionary"}}}}
   return null;
 }
 // the card's guide leaves the gap out ("wah ah-ree-mahss kah"): put the word's guide back where the ~ is in the romaji
@@ -117,7 +122,7 @@ const RULES=[
   ["I",/\ballerg(?:ic|y) to (.+)/i],["I",/\b([a-z]+) allergy\b/i],
   ["J",/\b(?:medicine|something|anything|pills?|tablets?) for (?:an? |my |the )?(.+)/i],
   ["F",/\bwithout (?:the |any )?(.+)/i],["F",/\b(?:hold|skip|leave out|remove) the (.+)/i],
-  ["G",/\b(?:can'?t|cannot|don'?t|do not|doesn'?t|does not) eat (.+)/i],
+  ["G",/^(?:i|we) (?:can'?t|cannot|don'?t|do not) eat (.+)/i],
   ["H",/\bdoes (?:this|it|that) (?:contain|have|include) (?:any )?(.+)/i],["H",/\b(?:is|are) there (?:any )?(.+?) in (?:this|it|that|here)\b/i],
   ["P",/\b(?:does|is|will) (?:this|the|that) bus (?:go|going|stop|stopping) (?:to|at) (.+)/i],
   ["Q",/\b(?:does|is|will) (?:this|the|that) train (?:stop|stopping|go|going) (?:at|to|in) (.+)/i],
@@ -141,6 +146,7 @@ function ruleFill(q){
     const w=m[1].replace(/[,.]? please$/i,"").replace(/\s+(?:here|around here|near here|nearby|for me|today|now|right now)$/i,"").replace(/["”']$/,"")
       .replace(/\s+(?:at|to|located|from|in|on)$/i,"").trim();   // "where is the vending machine at"
     if(!w||/^to /i.test(w)||w.split(" ").length>3)return null;
+    if(w.split(" ").some((x,i,a)=>TIME[x.toLowerCase()]!==undefined||TIME[a.slice(i).join(" ").toLowerCase()]!==undefined))return null;   // "Osaka tomorrow": left to the sentence builder
     return fillHTML(L,w);
   }
   return null;
@@ -168,8 +174,9 @@ const gloss=d=>d[4].split(";")[0].trim();
 // and its reading and word type are taken from there
 function byJP(alts,type){
   wix();if(!JPX)return null;
-  for(const jp of alts.split("|")){
-    const d=JPX.get(jp);
+  for(const alt of alts.split("|")){
+    const[jp,kk]=alt.split(":");   // "開く:あく": this reading, not ひらく
+    const d=kk?window.DICT.find(x=>x[0]===jp&&x[1]===kk):JPX.get(jp);
     if(d&&okType(d,type))return{jp:d[0],kana:d[1],pos:d[6]||"",en:gloss(d),kind:"dictionary"};
     const x=ENTRIES.find(x=>x.e.jp===jp&&x.f.single);
     if(x){const w=fromCard(x,type);if(w)return w}
@@ -195,7 +202,7 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
   car:"車",bike:"自転車",bicycle:"自転車",train:"電車",bus:"バス",taxi:"タクシー",plane:"飛行機",airplane:"飛行機",boat:"船",ship:"船",station:"駅",airport:"空港",hotel:"ホテル",shop:"店",store:"店",
   restaurant:"レストラン",hospital:"病院",pharmacy:"薬局",school:"学校",bank:"銀行","post office":"郵便局",park:"公園",temple:"お寺|寺",shrine:"神社",castle:"城",museum:"博物館",library:"図書館",
   toilet:"トイレ",bathroom:"トイレ",restroom:"トイレ",water:"水",tea:"お茶",coffee:"コーヒー",beer:"ビール",food:"食べ物",rice:"ご飯",bread:"パン",meat:"肉",fish:"魚",egg:"卵",vegetable:"野菜",fruit:"果物",
-  book:"本",phone:"電話",smartphone:"スマホ",photo:"写真",picture:"写真",map:"地図",wallet:"財布",passport:"パスポート",umbrella:"傘",hat:"帽子",shoe:"靴",shoes:"靴",clothes:"服",shirt:"シャツ",towel:"タオル",
+  book:"本",phone:"スマホ",smartphone:"スマホ",photo:"写真",picture:"写真",map:"地図",wallet:"財布",passport:"パスポート",umbrella:"傘",hat:"帽子",shoe:"靴",shoes:"靴",clothes:"服",shirt:"シャツ",towel:"タオル",
   medicine:"薬",doctor:"医者",friend:"友達",family:"家族",child:"子供",kid:"子供",man:"男の人",woman:"女の人",person:"人",people:"人",teacher:"先生",student:"学生",dog:"犬",cat:"猫",bird:"鳥",
   tree:"木",flower:"花",mountain:"山",river:"川",sea:"海",ocean:"海",beach:"ビーチ",sky:"空",rain:"雨",snow:"雪",wind:"風",weather:"天気",fire:"火",road:"道",street:"通り",bridge:"橋",building:"建物",
   town:"町",city:"街",country:"国",world:"世界",movie:"映画",film:"映画",music:"音楽",song:"歌",game:"ゲーム",plate:"皿",dish:"皿",knife:"ナイフ",spoon:"スプーン",fork:"フォーク",chopsticks:"箸",
@@ -206,9 +213,9 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
   ramen:"ラーメン",sushi:"寿司",sake:"日本酒",alcohol:"お酒",juice:"ジュース",milk:"牛乳",sugar:"砂糖",salt:"塩",ice:"氷",glass:"グラス",bottle:"瓶",box:"箱",paper:"紙",pen:"ペン",card:"カード",
   ticket:"チケット",blanket:"毛布",pillow:"枕",soap:"石鹸|せっけん",garden:"庭",sun:"太陽",moon:"月",star:"星",animal:"動物",temperature:"温度",fever:"熱",cold:"風邪",pain:"痛み"},
  adj:{big:"大きい",large:"大きい",small:"小さい",little:"小さい",tiny:"小さい",spicy:"辛い",expensive:"高い",pricey:"高い",cheap:"安い",tall:"高い",high:"高い",low:"低い",
-  good:"いい",nice:"いい",great:"すごい",amazing:"すごい",awesome:"すごい",bad:"悪い",new:"新しい",old:"古い",fast:"速い|早い",quick:"速い|早い",early:"早い",slow:"遅い",late:"遅い",near:"近い",close:"近い",far:"遠い",
+  good:"いい",nice:"いい",great:"すごい",amazing:"すごい",awesome:"すごい",bad:"悪い",new:c=>c&&c.an?false:"新しい",old:c=>c&&c.an?false:"古い",favorite:"好き",favourite:"好き",rich:c=>c&&(c.thing===null||c.an)?false:"濃厚",free:c=>c&&(c.thing===null||c.an)?"暇":false,fast:"速い|早い",quick:"速い|早い",early:"早い",slow:"遅い",late:"遅い",near:"近い",close:"近い",far:"遠い",
   delicious:"おいしい|美味しい",tasty:"おいしい|美味しい",yummy:"おいしい|美味しい",cute:"かわいい|可愛い",pretty:"きれい|綺麗|奇麗",beautiful:"きれい|綺麗|奇麗",clean:"きれい|綺麗|奇麗",dirty:"汚い",
-  quiet:"静か",noisy:"うるさい",loud:"うるさい",busy:"忙しい",fun:"楽しい",enjoyable:"楽しい",interesting:"面白い",funny:"面白い",boring:"つまらない",difficult:"難しい",hard:"難しい",easy:"簡単",simple:"簡単",
+  quiet:"静か",noisy:"うるさい",loud:"うるさい",busy:"忙しい",fun:"楽しい",enjoyable:"楽しい",interesting:"面白い",funny:"面白い",boring:"つまらない",difficult:"難しい",hard:c=>c&&c.an?false:c&&c.ph?"硬い":"難しい",easy:"簡単",simple:"簡単",
   heavy:"重い",light:"軽い",long:"長い",short:"短い",wide:"広い",spacious:"広い",narrow:"狭い",cramped:"狭い",strong:"強い",weak:"弱い",sweet:"甘い",salty:"しょっぱい|塩辛い",bitter:"苦い",sour:"酸っぱい|すっぱい",
   safe:"安全",dangerous:"危ない",scary:"怖い",frightening:"怖い",cool:"かっこいい",strange:"変",weird:"変",odd:"変",famous:"有名",convenient:"便利",handy:"便利",kind:"優しい",gentle:"優しい",
   sleepy:"眠い",painful:"痛い",sore:"痛い",happy:"嬉しい",glad:"嬉しい",sad:"悲しい",lonely:"寂しい",warm:"暖かい",bright:"明るい",dark:"暗い",soft:"柔らかい",thick:"厚い",thin:"薄い",young:"若い",
@@ -221,7 +228,7 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
   send:"送る",show:"見せる",teach:"教える",tell:"教える",enter:"入る","go in":"入る","go into":"入る","go out":"出かける",ride:"乗る","get on":"乗る","get off":"降りる",wash:"洗う",cut:"切る",borrow:"借りる",rent:"借りる",lend:"貸す",
   find:"見つける",lose:"なくす|無くす",forget:"忘れる",remember:"覚える",learn:"習う",change:"変える",choose:"選ぶ",pick:"選ぶ",help:"手伝う",carry:"持つ",hold:"持つ",climb:"登る|上る",start:"始める",begin:"始める",
   stay:"泊まる",touch:"触る","try on":"試着",order:"注文",reserve:"予約",book:"予約",cancel:"キャンセル",check:"確認",confirm:"確認",charge:"充電",exchange:"交換",call:"電話",phone:"電話",
-  "wake up":"起きる","get up":"起きる",sell:"売る",cook:"料理",drive:"運転",travel:"旅行",shop:"買い物","go shopping":"買い物",smoke:"吸う",throw:"捨てる","throw away":"捨てる",
+  "wake up":"起きる","get up":"起きる",sell:"売る",cook:"料理",drive:"運転",travel:"旅行",shop:"買い物","go shopping":"買い物",smoke:"吸う",throw:"投げる","throw away":"捨てる",
   push:"押す",press:"押す",pull:"引く",stop:"止まる",hurry:"急ぐ",ask:"聞く",answer:"答える",practice:"練習",explain:"説明",translate:"翻訳",repeat:"繰り返す",bring:"持ってくる|持って来る",
   "pick up":"拾う",kick:"蹴る",sting:"刺す",punch:"殴る",hit:"叩く",fight:"戦う",steal:"盗む",bite:"噛む",catch:"捕まえる",chase:"追いかける",break:"壊す",hug:"抱きしめる",kiss:"キス",kill:"殺す",scare:"驚かす",
   search:"探す","look for":"探す","search for":"探す",die:"死ぬ",laugh:"笑う",cry:"泣く",dance:"踊る",fly:"飛ぶ",win:"勝つ",lose2:"負ける",join:"参加",clean:"掃除",fix:"直す",repair:"直す",
@@ -229,11 +236,11 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
 const FIXOBJ={"take a photo":"写真","take a picture":"写真","take photos":"写真","take pictures":"写真","take a shower":"シャワー","take a bath":"お風呂|風呂"};
 // English verbs whose Japanese depends too much on the situation to build safely
 const VBLOCK=new Set("be have get do make take put set let keep feel become seem think know say want like need mean turn give leave miss mind care would could should will can may might must am is are was were love hate hope wish look".split(" "));
-const NIOBJ=new Set(["会う","乗る","入る","触る","登る","座る","着く","行く","来る","帰る","戻る","泊まる","住む","電話","参加","勝つ","負ける"]);
+const NIOBJ=new Set(["似る","慣れる","頼る","反対","謝る","気づく","気付く","驚く","憧れる","似合う","向かう","通う","近づく","触れる","従う","協力","感謝","挑戦","合格","投票","出席","寄付","吠える","噛みつく","話しかける","相談","就職","答える","着く","到着","失敗","乗り遅れる","会う","乗る","入る","触る","登る","座る","着く","行く","来る","帰る","戻る","泊まる","住む","電話","参加","勝つ","負ける"]);
 const GAOBJ=new Set(["わかる","分かる","できる","出来る","見える","聞こえる"]);
 const NOPOT=new Set(["わかる","分かる","できる","出来る","ある","いる","見える","聞こえる"]);
 // states that English says with "is ..." but Japanese says with a verb: left to the hand-written cards
-const PBLOCK=new Set("tired hungry thirsty lost broken crowded open closed full ready married sick ill drunk here there late gone done finished over sure sorry right wrong left welcome back home out in on off up down single alone free available busy2 healthy shy uncomfortable worried excited bored interested scared afraid surprised confused angry mad nervous annoyed".split(" "));
+const PBLOCK=new Set("tired hungry thirsty lost broken crowded open closed full ready married sick ill drunk here there late gone done finished over sure sorry right wrong left welcome back home out in on off up down single alone available dead busy2 healthy shy uncomfortable worried excited interested surprised confused angry mad nervous annoyed".split(" "));
 // Dictionary choice: the word must list this meaning among its first ones, and of
 // those the most commonly used word wins (壁 before 塀 for "wall"). Meaning match
 // only: a look-alike romaji spelling never counts.
@@ -243,9 +250,10 @@ function dictWord(en,type){
   const sc=r=>r[0]*25+Math.min(r[1][7]==null?999:r[1][7],600);
   rows.sort((a,b)=>sc(a)-sc(b));
   if((rows[0][1][7]==null?999:rows[0][1][7])>560)return null;   // too rare to trust without a person checking
-  const d=rows[0][1];return{jp:d[0],kana:d[1],pos:d[6]||"",en:gloss(d),kind:"dictionary"};
+  const d=rows[0][1];if(type==="adj"&&/^[ァ-ヶー・]+$/.test(d[0]))return null;   // デッド for "dead": not what people say
+  return{jp:d[0],kana:d[1],pos:d[6]||"",en:gloss(d),kind:"dictionary"};
 }
-const NOTNOUN=new Set("you me him her them us it i we they he she what who whom which whose one ones thing things something anything everything nothing someone anyone everyone somebody anybody everybody nobody here there now then that this these those all both each many much more most some any no not yes ok okay very too so".split(" "));
+const NOTNOUN=new Set("you me him her them us it i we they he she what who whom which whose one ones thing things something anything everything nothing someone anyone everyone somebody anybody everybody nobody here there now then that this these those all both each many much more most some any no not yes ok okay very too so up down out off away around".split(" "));
 function npNoun(word){
   const np=NP(word);if(!np||np.pron||np.chunks.length<2||np.chunks.some(c=>c[1]==null))return null;
   return{jp:np.chunks.map(c=>c[0]).join(""),kana:np.chunks.map(c=>c[1]).join(""),say:sayAll(np.chunks.map(c=>c[1])),rom:np.chunks.map(c=>romaji(c[1])).join(" "),en:np.used.map(u=>short(u.en,30)).join(" + "),kind:"dictionary"};
@@ -257,13 +265,17 @@ function cardWord(en,type){
 const NOTWORD=new Set("in on at up down out off over under to of for by with from as like near into onto about than then and or but if so a an the is are was were be am do does did not no yes".split(" "));
 function word(en,type,ctx){
   en=en.trim().toLowerCase();if(!en||NOTWORD.has(en)||NOTNOUN.has(en))return null;wix();if(!JPX)return null;
-  const P=PREF[type][en];
-  if(P){const w=byJP(typeof P==="function"?P(ctx):P,type);if(w)return w}
+  const P0=PREF[type][en],P=typeof P0==="function"?P0(ctx):P0;
+  if(P===false)return null;   // the usual word does not fit here ("old" for a person): not built
+  if(P){const w=byJP(P,type);if(w)return w}
+  // the checked everyday lists (data/everyday_verbs.txt, everyday_adjectives.txt)
+  const PK=type==="v"?window.PICKV:type==="adj"?window.PICKA:null,pi=PK&&PK[en],pd=pi!=null&&window.DICT[pi];
+  if(pd&&okType(pd,type))return{jp:pd[0],kana:pd[1],pos:pd[6]||"",en:gloss(pd),kind:"everyday"};
   return cardWord(en,type)||dictWord(en,type);
 }
 // ----- nouns and noun phrases -----
 const C=(jp,kana)=>[jp,kana===undefined?jp:kana];
-const DET={this:[C("この")],these:[C("この")],that:[C("その")],those:[C("その")],my:[C("私","わたし"),C("の")],our:[C("私たち","わたしたち"),C("の")],his:[C("彼","かれ"),C("の")],her:[C("彼女","かのじょ"),C("の")]};
+const DET={this:[C("この")],these:[C("この")],that:[C("あの")],those:[C("あの")],my:[C("私","わたし"),C("の")],our:[C("私たち","わたしたち"),C("の")],his:[C("彼","かれ"),C("の")],her:[C("彼女","かのじょ"),C("の")]};
 const PRON={this:C("これ"),that:C("それ"),it:C("それ"),these:C("これ"),those:C("それ"),"this one":C("これ"),"that one":C("それ"),here:C("ここ"),there:C("そこ"),"over there":C("あそこ"),
   he:C("彼","かれ"),she:C("彼女","かのじょ"),we:C("私たち","わたしたち"),i:C("私","わたし"),"this place":C("ここ"),"that place":C("そこ")};
 // A word with no dictionary meaning at all and no card ("Nutella", "nutella", "Tokyo Dome")
@@ -273,29 +285,39 @@ function isName(w){
   const l=w.toLowerCase(),X=wix();
   if(NOTNOUN.has(l)||NOTWORD.has(l)||TIME[l]!==undefined||PBLOCK.has(l)||l.split(" ").some(p=>NOTWORD.has(p)||NOTNOUN.has(p)||STOP.has(p)))return false;
   for(const f of[l,l.replace(/s$/,""),l.replace(/es$/,""),l.replace(/ing$/,""),l.replace(/ed$/,""),l.replace(/ly$/,"")])if(X.get(gkey(f))||window.SYN&&window.SYN[f])return false;
+  if(/ /.test(w)&&!w.split(" ").every(p=>/^[A-Z0-9]/.test(p))&&l.split(" ").some(p=>window.PICK&&window.PICK[p]!=null||PREF.n[p]))return false;
   return!dictLookup(l).length&&!rank(l).some(a=>a[0]>=18);
 }
+const isThing=s=>{const np=NP(s);return!!np&&!np.pron&&np.chunks.every(c=>c[1]!=null)};
+const dropMy=ch=>{const o=[];for(let i=0;i<ch.length;i++){if(ch[i][0]==="私"&&ch[i+1]&&ch[i+1][0]==="の"){i++;continue}o.push(ch[i])}return o};
 function NP(s){
   s=s.trim();const l=s.toLowerCase();
   if(PRON[l])return{chunks:[PRON[l]],used:[],pron:l};
   let det=null,rest=s,m=/^(this|that|these|those|my|our|his|her|the|an?|some|any|your) (.+)$/i.exec(s);
   if(m){det=m[1].toLowerCase();rest=m[2]}
   let far=false;if(/ over there$/i.test(rest)){far=true;rest=rest.replace(/ over there$/i,"")}
+  {const im=/^(.+?) (?:in|at|from) ([A-Z][\w'-]*(?: [A-Z][\w'-]*)?)$/.exec(rest);   // "the deer in Nara" -> 奈良の鹿
+   if(im&&(!det||/^(the|an?)$/.test(det))){const a=NP(im[2]),b=NP(im[1]);if(a&&b&&!a.pron&&!b.pron&&isPlaceNP(a))return{chunks:[...a.chunks,C("の"),...b.chunks],used:[...a.used,...b.used],en:rest};return null}}
   const ws=rest.split(" ");if(ws.length>4||/\b(and|or|of|who|which|that)\b/i.test(rest))return null;
+  if(/^(whole|entire|own|other|only|total|half)$/i.test(ws[0]))return null;
   const chunks=[],used=[];
   if(NOTNOUN.has(rest.toLowerCase())||TIME[rest.toLowerCase()]!==undefined)return null;
+  if(/^[A-Z][a-z'-]+$/.test(rest)){const lw=rest.toLowerCase(),b=lw.replace(/s$/,""),n0=findNoun(rest);
+    if(n0&&!(n0.kind==="everyday"||PREF.n[lw]||PREF.n[b]||/(^|,)pl(,|$)/.test(n0.pos||"")||new RegExp("(^|[^a-z])"+b).test((n0.en||"").toLowerCase()))){
+      chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"a name, said as it is"});return{chunks,used,en:rest}}}
   let n=findNoun(rest);
   if(!n&&ws.length>=2&&TIME[ws.slice(1).join(" ").toLowerCase()]===undefined){   // describing word + noun: "big bag"
     const a=word(ws[0],"adj",{thing:true}),n2=a&&findNoun(ws.slice(1).join(" "));
     if(n2){const at=/adj-i/.test(a.pos)?C(a.jp,a.kana):/adj-na/.test(a.pos)?C(a.jp+"な",a.kana+"な"):C(a.jp+"の",a.kana+"の");chunks.push(at);used.push(a);n=n2}
   }
-  if(n){chunks.push(C(n.jp,n.kana));used.push(n)}
+  if(n){if(n.parts)chunks.push(...n.parts);else chunks.push(C(n.jp,n.kana));used.push(n)}
   else{   // a real name ("Kyoto Tower", "Nutella") is said as it is
     if(!isName(rest))return null;
     chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"not in the dictionary: names and brands are said as they are, with a Japanese accent"});
   }
   const FAMILY=/^(おばあちゃん|おじいちゃん|お母さん|お父さん|お兄さん|お姉さん|弟|妹|両親|家族|息子|娘|夫|妻)$/;
   if(det==="my"&&n&&FAMILY.test(n.jp))det=null;   // "my mom" -> just お母さん: Japanese leaves "my" out for family
+  if(det==="my"&&n&&/(^|,)ani(,|$)/.test(n.pos||"")){chunks.unshift(C("うちの"));det=null}   // "my dog" -> うちの犬
   if(det&&DET[det])chunks.unshift(...(far&&det==="that"?[C("あの")]:DET[det]));
   return{chunks,used,en:rest};
 }
@@ -345,7 +367,24 @@ function passive(w){
   if(s.suru)return[w.jp+"され",w.kana+"され"];
   return s.a?[s.a[0]+"れ",s.a[1]+"れ"]:null;
 }
-function vend(w,f){
+// おならをしました -> おなら / を / しました, so the romaji has spaces
+const splitWo=(a,w)=>a&&(!w||!/(^|,)wo(,|$)/.test(w.pos||"")?a:a.flatMap(c=>{const m=/^(.+?)([をが])(.+)$/.exec(c[0]),n=c[1]&&/^(.+?)([をが])(.+)$/.exec(c[1]);return m&&n&&m[2]===n[2]?[[m[1],n[1]],m[2]==="を"?C("を","お"):C("が"),[m[3],n[3]]]:[c]}));
+function vend(w,f){return splitWo(vend0(w,f),w)}
+// an order: "help me" on its own is 助けて (rescue me), not 手伝って (help me with a task)
+function order(vp){
+  if(vp.me&&vp.v.jp==="手伝う"&&!vp.pre.length){const w=byJP("助ける","v");if(w){vp.used[vp.used.indexOf(vp.v)]=w;vp.v=w}}
+  return vend(vp.v,"tekudasai");
+}
+// plain (dictionary-style) forms, used before ん です か ("why did ...?")
+function vplain(w,f){
+  const s=vstems(w);if(!s||!s.te)return null;
+  const ta=[s.te[0].replace(/て$/,"た").replace(/で$/,"だ"),s.te[1].replace(/て$/,"た").replace(/で$/,"だ")];
+  if(f==="ta")return splitWo([C(ta[0],ta[1])],w);
+  if(f==="teiru")return splitWo([C(s.te[0],s.te[1]),C("いる")],w);
+  if(f==="dict")return splitWo([C(w.jp+(s.suru?"する":""),w.kana+(s.suru?"する":""))],w);
+  return null;
+}
+function vend0(w,f){
   if(f==="ukemi"||f==="ukemiteiru"){const P=passive(w);if(!P)return null;return f==="ukemi"?[C(P[0]+"ました",P[1]+"ました")]:[C(P[0]+"て",P[1]+"て"),C("います")]}
   const s=vstems(w);if(!s)return null;
   const J=(a,x)=>a?C(a[0]+x,a[1]+x):null,ok=a=>a.every(Boolean)?a:null;
@@ -360,6 +399,7 @@ function vend(w,f){
     case"temorau":return ok([s.te&&C(s.te[0],s.te[1]),C("もらえます"),C("か")]);
     case"temoii":return ok([s.te&&C(s.te[0],s.te[1]),C("も"),C("いい"),C("です"),C("か")]);
     case"teiru":return ok([s.te&&C(s.te[0],s.te[1]),C("います")]);
+    case"teinai":return ok([s.te&&C(s.te[0],s.te[1]),C("いません")]);case"teita":return ok([s.te&&C(s.te[0],s.te[1]),C("いました")]);
     case"naide":return ok([J(s.a,"ないで"),C("ください")]);
     case"must":return ok([J(s.a,"ない"),C("と"),C("いけません")]);
     case"pot":return ok([J(pot,"ます")]);case"potneg":return ok([J(pot,"ません")]);case"potka":return ok([J(pot,"ます"),C("か")]);
@@ -367,11 +407,17 @@ function vend(w,f){
   }
   return null;
 }
-const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch",stole:"steal",stung:"sting",bit:"bite",fought:"fight",hit:"hit",kicked:"kick",chased:"chase",hugged:"hug"};
+const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch",stole:"steal",stung:"sting",bit:"bite",fought:"fight",hit:"hit",kicked:"kick",chased:"chase",hugged:"hug",
+  fell:"fall",fed:"feed",knew:"know",grew:"grow",drew:"draw",shot:"shoot",spent:"spend",built:"build",bent:"bend",blew:"blow",dug:"dig",hid:"hide",hung:"hang",led:"lead",
+  made:"make",meant:"mean",rang:"ring",rose:"rise",said:"say",sank:"sink",shook:"shake",slid:"slide",spun:"spin",spat:"spit",stuck:"stick",struck:"strike",swept:"sweep",
+  swung:"swing",took:"take",thought:"think",tore:"tear",understood:"understand",wept:"weep",gave:"give",got:"get",had:"have",did:"do",became:"become",forgave:"forgive",
+  froze:"freeze",left:"leave",kept:"keep",felt:"feel",burnt:"burn",learnt:"learn",dreamt:"dream",fled:"flee",bled:"bleed",crept:"creep",dealt:"deal",lent:"lend",
+  mistook:"mistake",overslept:"oversleep",shrank:"shrink",sought:"seek",sprang:"spring",stank:"stink",swore:"swear",withdrew:"withdraw",arose:"arise",awoke:"awake",
+  forgot:"forget",slept:"sleep",bit:"bite",ate:"eat",drank:"drink",ran:"run",threw:"throw",yeeted:"yeet"};
 function enVerb(w){
   if(IRR[w]&&w!=="cut"&&w!=="read")return{c:[IRR[w]],past:true};
   if(/ing$/.test(w)&&w.length>4){const b=w.slice(0,-3);return{c:[b,b+"e",b.replace(/(.)\1$/,"$1")],ing:true}}
-  if(/ed$/.test(w)&&w.length>3){const b=w.slice(0,-2);return{c:[b,w.slice(0,-1),b.replace(/(.)\1$/,"$1"),b.replace(/i$/,"y")],past:true}}
+  if(/ed$/.test(w)&&w.length>3&&!/^(feed|need|bleed|speed|seed|breed|weed|proceed|succeed|exceed)$/.test(w)){const b=w.slice(0,-2);return{c:[b,w.slice(0,-1),b.replace(/(.)\1$/,"$1"),b.replace(/i$/,"y")],past:true}}
   return{c:[w]};
 }
 const TIME={today:"今日",tomorrow:"明日",yesterday:"昨日",now:"今",later:"後で",tonight:"今夜","every day":"毎日",again:"もう一度",slowly:"ゆっくり",together:"一緒に",soon:"もうすぐ","this morning":"今朝","next week":"来週","last week":"先週","tomorrow morning":null};
@@ -390,29 +436,38 @@ function VP(s){
   for(let n=Math.min(4,ws.length);n>=1&&!v;n--){
     for(const c of head.c){
       const k=[c,...ws.slice(1,n).map(x=>x.toLowerCase())].join(" ");
-      if(n===1&&VBLOCK.has(c))continue;
-      if(n>1&&!PREF.v[k])continue;
+      if(n===1&&VBLOCK.has(c)&&c!=="leave"&&c!=="miss")continue;
+      if(n>1&&!PREF.v[k]&&!(window.PICKV&&window.PICKV[k]!=null))continue;
+      if(k==="miss"||k==="feed"){   // "miss the train" -> 乗り遅れる (only with a train / bus / plane); "feed the deer" -> 餌をあげる
+        const w=byJP(k==="miss"?"乗り遅れる":"あげる","v");if(w){v=w;info=head;nv=n;key=k;break}continue}
       const w=word(k,"v");if(w){v=w;info=head;nv=n;key=k;break}
     }
   }
   if(!v||!vstems(v))return null;
   used.push(v);
-  let rest=ws.slice(nv).join(" ");const me=/^(me|us)( |$)/i.test(rest);
+  let rest=ws.slice(nv).join(" ");const me=/^(me|us)( |$)/i.test(rest),you=/^you( |$)/i.test(rest);
   rest=rest.replace(/^(me|us|you)( |$)/i,"").trim();
+  if(me&&v.jp==="ついて行く"){const w=byJP("ついてくる|ついて来る|付いて来る","v");if(w){used[used.indexOf(v)]=w;v=w}}   // "follow me": come along behind me
+  let sugi=false;{const tm=/(?:^| )too much$/i.exec(rest);if(tm){sugi=true;rest=rest.slice(0,tm.index).trim()}}   // "ate too much": 食べすぎる
+  let ofw=null;if(FIXOBJ[key]&&/^of (me|us)$/i.test(rest)){ofw=/us/i.test(rest)?[C("私たち","わたしたち"),C("の")]:[C("私","わたし"),C("の")];rest=""}   // "a picture of us"
+  let objN=null;
   const mv=/^(行く|来る|帰る|戻る)$/.test(v.jp);
   // "here" / "there": where it happens
   const pm=/(?:^| )(over there|here|there)$/i.exec(rest);
   if(pm){pre.push(PRON[pm[1].toLowerCase()],C(mv||/^(泊まる|住む|座る|入る|置く|止まる)$/.test(v.jp)?"に":"で"));rest=rest.slice(0,pm.index).trim()}
-  if(FIXOBJ[key]){const o=byJP(FIXOBJ[key],"n");if(!o)return null;pre.push(C(o.jp,o.kana),key==="take a bath"?C("に"):C("を","お"));used.push(o)}
+  if(FIXOBJ[key]){const o=byJP(FIXOBJ[key],"n");if(!o)return null;pre.push(...(ofw||[]),C(o.jp,o.kana),key==="take a bath"?C("に"):C("を","お"));used.push(o)}
   if(rest){
     if(FIXOBJ[key])return null;
-    const m=/^(.*?)(?:(?:^| )(to|at|in|with|from|by) (.+))?$/i.exec(rest);if(!m)return null;
+    const m=/^(.*?)(?:(?:^| )(to|at|in|with|from|by|on) (.+))?$/i.exec(rest);if(!m)return null;
     let obj=m[1].trim(),pp=m[2]?[m[2].toLowerCase(),m[3]]:null;
+    if(pp&&pp[0]==="with"&&/^(you|me|us)$/i.test(pp[1])){pre.push(C("一緒に","いっしょに"));pp=null}   // "with you": together
+    // "sleeping on my bed" (ベッドで): only for actions that don't do something to a thing
+    if(pp&&pp[0]==="on"&&(obj||!/(^|,)vi/.test(v.pos)||/(^|,)vt/.test(v.pos)))return null;
     if(pp&&/\b(to|at|in|with|from|by|on|for|about|into)\b/i.test(pp[1]))return null;   // two "to/at/with" parts: too complex
     if(/\b(on|for|about|into|because|and|but|if|when|so)\b/i.test(obj)||/ly$/i.test(obj)&&!PREF.n[obj.toLowerCase()])return null;   // "quickly", "carefully": how-words are not things
     if(pp){
       const np=NP(pp[1]);if(!np||np.pron==="i")return null;
-      let part=PREP[pp[0]];
+      let part=pp[0]==="on"?(/^(座る|乗る|立つ)$/.test(v.jp)?"に":"で"):PREP[pp[0]];
       if((pp[0]==="at"||pp[0]==="in")&&/^(泊まる|住む|座る|入る|いる|ある)$/.test(v.jp))part="に";
       if(pp[0]==="to"&&!mv&&!/^(送る|電話|教える|見せる)$/.test(v.jp))return null;
       pre.push(...np.chunks,C(part));used.push(...np.used);
@@ -423,17 +478,60 @@ function VP(s){
         else if(/^(home)$/i.test(obj)){}
         else return null;
       }else{
+        if(/(^|,)wo(,|$)/.test(v.pos||""))return null;   // 手を振る already has its thing: "wave at him" is not built
+        let all=false;{const am=/^all (?:of )?(.+)$/i.exec(obj);if(am){all=true;obj=am[1]}}   // "all my money": お金を全部
         const np=NP(obj);if(!np||np.pron==="i"||np.pron==="we"||np.pron==="he"||np.pron==="she")return null;
+        const on0=np.used[np.used.length-1]||{},swapN=jp=>{const t=byJP(jp,"n");if(t){np.chunks[np.chunks.length-1]=C(t.jp,t.kana);np.used[np.used.length-1]=t}};
+        objN=on0;
+        const swapV=w=>{if(!w)return false;used[used.indexOf(v)]=w;v=w;return true};
+        if(v.jp==="遊ぶ"){   // "play a game" -> ゲームをする, "play the piano" -> ピアノを弾く; anything else is not built
+          const ins=/^(ピアノ|ギター|バイオリン|ウクレレ|三味線|琴)$/.test(on0.jp),gm=/(^|,)sp(,|$)/.test(on0.pos||"")||/^(ゲーム|テレビゲーム|トランプ|カード|将棋|チェス|囲碁|かくれんぼ|鬼ごっこ)$/.test(on0.jp);
+          if(!swapV(ins?byJP("弾く:ひく","v"):gm?byJP("する","v"):null))return null}
+        if(key==="lose"&&/^(試合|ゲーム|勝負|喧嘩|レース|戦い|戦争|選挙|裁判|賭け)$/.test(on0.jp)&&!swapV(byJP("負ける","v")))return null;   // lose a match: 試合に負ける
+        if(v.jp==="食べる"&&/^(鶏|豚|牛)$/.test(on0.jp))swapN(on0.jp+"肉");
+        if(v.jp==="料理"&&!swapV(byJP("作る","v")))return null;
+        if(v.jp==="歌う"&&on0.jp==="カラオケ"&&!swapV(byJP("する","v")))return null;   // "sing karaoke": カラオケをする   // "cooking curry": カレーを作っています
+        if(v.jp==="試す"&&/(^|,)fd(,|$)/.test(on0.pos||"")){   // "try sushi": 食べてみる / 飲んでみる
+          const dr=/^(ビール|水|お水|お茶|コーヒー|紅茶|日本酒|ワイン|ジュース|お酒|酒|牛乳|ミルク|コーラ|緑茶|抹茶|味噌汁|ハイボール|カクテル)$/.test(on0.jp),t=byJP(dr?"飲む":"食べる","v"),ts=t&&vstems(t);
+          if(!ts||!swapV({jp:ts.te[0]+"みる",kana:ts.te[1]+"みる",pos:"v1,vt",en:"try "+(dr?"drinking":"eating")+" (… てみる = try doing)",kind:t.kind}))return null}
+        if(/^(訪ねる|訪れる|訪問)$/.test(v.jp)&&isPlaceNP(np)&&!swapV(byJP("行く","v")))return null;   // visit Kyoto: 京都に行く   // eat chicken: 鶏肉, not the live bird
+        if((v.kana==="つける"||v.jp==="消す")&&on0.jp==="光")swapN("電気");   // turn off the light: 電気
         let part;
-        if(v.jp==="戦う")part=C("と");else if(NIOBJ.has(v.jp))part=C("に");else if(GAOBJ.has(v.jp))part=C("が");
+        if(key==="feed"){pre.push(...np.chunks,C("に"));used.push(...np.used);const e=byJP("餌","n");if(!e)return null;pre.push(C(e.jp,e.kana),C("を","お"));used.push(e);obj=""}
+        else if(/^(戦う|結婚|喧嘩|付き合う)$/.test(v.jp))part=C("と");else if(NIOBJ.has(v.jp))part=C("に");else if(GAOBJ.has(v.jp))part=C("が");else if(/^(渡る|通る)$/.test(v.jp))part=C("を","お");
         else if(/(^|,)vt/.test(v.pos)||(/(^|,)vs/.test(v.pos)&&!/(^|,)vi/.test(v.pos)))part=C("を","お");
-        else return null;   // this verb takes no direct object: not built
-        pre.push(...np.chunks,part);used.push(...np.used);
+        else if(/^(爆発|破裂|回転|振動)$/.test(v.jp)&&/(^|,)vs(,|$)/.test(v.pos)&&!/(^|,)vt/.test(v.pos)){   // 爆発 (explode) + a thing -> 爆発させる (make it explode)
+          const v2={jp:v.jp+"させる",kana:v.kana+"させる",pos:"v1,vt",en:"make it "+key+" (… させる = make it happen)",kind:v.kind};used[used.indexOf(v)]=v2;v=v2;part=C("を","お")}
+        else if(key!=="feed")return null;   // this verb takes no direct object: not built
+        if(part){if(all&&part[0]!=="を")return null;pre.push(...np.chunks,part,...(all?[C("全部","ぜんぶ")]:[]));used.push(...np.used)}
       }
     }
   }
-  return{v,pre,used,past:!!info.past,ing:!!info.ing,me};
+  if(key==="miss"&&!(objN&&/^(電車|バス|飛行機|船|タクシー|新幹線|終電|フェリー|便|地下鉄|始発)$/.test(objN.jp)))return null;
+  if(key==="feed"&&!objN)return null;
+  if(sugi){const st=vstems(v);if(!st||!st.i)return null;const v2={jp:st.i[0]+"すぎる",kana:st.i[1]+"すぎる",pos:"v1,vi"+(/(^|,)wo(,|$)/.test(v.pos)?",wo":""),en:"too much: "+v.en,kind:v.kind};used[used.indexOf(v)]=v2;v=v2}
+  return{v,pre,used,past:!!info.past,ing:!!info.ing,me,you};
 }
+// a thing that is a place you can be in or at (a name, a city, a shop, a station ...)
+const isPlaceNP=np=>{const n=np&&np.used[np.used.length-1];return!!n&&(n.kana==null||/(^|,)(pl|pc)(,|$)/.test(n.pos||"")||/^(駅|空港|ホテル|店|お店|レストラン|病院|薬局|学校|銀行|郵便局|公園|お寺|寺|神社|城|博物館|図書館|トイレ|ビーチ|家|部屋|会社|海|山|川|町|街|国|日本|コンビニ|カフェ|映画館|美術館|動物園|水族館|温泉|旅館|大学|台所|庭|車|電車|バス|飛行機|船|タクシー)$/.test(n.jp))};
+// "do it" Japanese verb -> "it happens" verb, for sentences where a thing does it by itself ("the shop opens")
+const VIPAIR={"開ける":"開く:あく","閉める":"閉まる","始める":"始まる","壊す":"壊れる","消す":"消える","溶かす":"溶ける","焦がす":"焦げる","凍らせる":"凍る","乾かす":"乾く",
+  "転がす":"転がる","回す":"回る","冷やす":"冷える","温める":"温まる","割る":"割れる","倒す":"倒れる","落とす":"落ちる","止める":"止まる","出す":"出る","入れる":"入る",
+  "起こす":"起きる","動かす":"動く","揺らす":"揺れる","汚す":"汚れる","曲げる":"曲がる","燃やす":"燃える","沸かす":"沸く","終える":"終わる","治す":"治る","直す":"直る",
+  "破る":"破れる","隠す":"隠れる","集める":"集まる","増やす":"増える","減らす":"減る","広げる":"広がる","変える":"変わる","続ける":"続く","見つける":"見つかる","縮める":"縮む"};
+function viSwap(vp){const t=VIPAIR[vp.v.jp];if(!t)return;const w=byJP(t,"v");if(w){vp.used[vp.used.indexOf(vp.v)]=w;vp.v=w}}
+// "is ..." states that Japanese says with an action word: [verb, 1 = things only / 2 = things only and already happened]
+const STATE={clogged:["詰まる",1],blocked:["詰まる",1],late:["遅れる"],delayed:["遅れる"],open:["開く:あく",1],closed:["閉まる",1],shut:["閉まる",1],
+  lost:["なくなる|無くなる",2],missing:["なくなる|無くなる",2],gone:["なくなる|無くなる",2],angry:["怒る:おこる"],mad:["怒る:おこる"],crowded:["混む",1],packed:["混む",1],
+  married:["結婚"],drunk:["酔う"],tired:["疲れる"],exhausted:["疲れる"],wet:["濡れる"],messy:["散らかる",1],
+  nervous:["緊張"],confused:["混乱"],irritated:["イライラ"],frustrated:["イライラ"],surprised:["びっくり",4],shocked:["びっくり",4],disappointed:["がっかり",4],
+  done:["終わる",4],finished:["終わる",4],awake:["起きる",5],asleep:["寝る",5],alive:["生きる",5],pregnant:["妊娠",5],injured:["怪我",5],hurt:["怪我",5],
+  fat:["太る",6],thin:["痩せる",6],skinny:["痩せる",6],old:["年を取る",6],frozen:["凍る",1],burnt:["焦げる",2],burned:["焦げる",2],rotten:["腐る",1],melted:["溶ける",2],dry:["乾く",1],
+  hungry:["空く:すく",0,"お腹","おなか"],starving:["空く:すく",0,"お腹","おなか"],thirsty:["渇く",0,"喉","のど"]};
+const SLANGP=new Set(["fire","bussin","goated"]);
+// where something is: [pattern, place word, its reading, exists (… ni arimasu) rather than … desu]
+const LOC=[[/^(?:near|close to) (.+)$/i,"近く","ちかく"],[/^next to (.+)$/i,"隣","となり"],[/^behind (.+)$/i,"後ろ","うしろ"],[/^in front of (.+)$/i,"前","まえ"],
+  [/^(?:on top of|on) (.+)$/i,"上","うえ",1],[/^under(?:neath)? (.+)$/i,"下","した",1],[/^inside (.+)$/i,"中","なか",1],[/^(?:in|at) (.+)$/i,null,null,1]];
 // ----- whole sentences -----
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 // 'Hello, how do I say "this wall is scary" in Japanese?' -> 'this wall is scary'
@@ -476,13 +574,55 @@ function compose(q){
     const t=str.trim().toLowerCase();
     if(/^(i|we|you|it)$/.test(t))return{chunks:[],used:[],thing:t==="it"?false:null,omit:t};
     const np=NP(str.trim());if(!np)return null;
-    return{chunks:[...np.chunks,T.length?GA:WA],used:np.used,thing:!np.pron||/^(this|that|these|those)/.test(np.pron)};
+    const ln=np.used[np.used.length-1],fl=ln&&ln.pos||"";
+    return{chunks:[...np.chunks,T.length?GA:WA],used:np.used,thing:!np.pron||/^(this|that|these|those)/.test(np.pron),pron:np.pron,
+      an:/(^|,)an(,|$)/.test(fl)||/^(he|she)$/.test(np.pron||"")||!!ln&&ln.kana==null,ph:/(^|,)ph(,|$)/.test(fl)};
   };
   const pred=(str,S,neg,past,mode)=>{   // what comes after is/are
     let t=str.trim(),adv=null,m;
     if((m=/^(very|really|so|extremely|super|too|a little|a bit|a little bit|slightly|kind of|pretty|quite|that) (.+)$/i.exec(t))){adv=m[1].toLowerCase();t=m[2]}
-    if(PBLOCK.has(t.toLowerCase())||/^(in|on|at|under|near|next|behind|with|from|for|to|of|by|inside|outside|above|below|between|across)\b/i.test(t))return null;
-    const a=word(t,"adj",{thing:S.thing});
+    const tl=t.toLowerCase();
+    if(!adv&&!mode){
+      if(/^on fire$/.test(tl))return null;
+      if(/^(tall|short)$/.test(tl)&&(S.an||S.omit&&S.omit!=="it")){
+        const g=byJP("背","n"),w=byJP(tl==="tall"?"高い":"低い","adj"),p=w&&adjPred(w,neg,past);return g&&p?{chunks:[C(g.jp,g.kana),GA,...p],used:[g,w]}:null}
+      if(/^(sick|ill|unwell|not well)$/.test(tl)&&(S.an||S.omit&&S.omit!=="it")&&!past&&!neg){   // feeling sick: 具合が悪い
+        const g=byJP("具合","n"),w=byJP("悪い","adj");return g&&w?{chunks:[C(g.jp,g.kana),GA,C(w.jp,w.kana),C("です")],used:[g,w]}:null}
+      // slang praise: "this ramen is fire" -> 最高 (the best)
+      if(SLANGP.has(tl)){if(neg||past)return null;const a=byJP("最高","adj");return a?{chunks:[C(a.jp,a.kana),C("です")],used:[a],notes:[`“${tl}” is slang for “really good”. 最高 (the best) is how people say that in everyday Japanese.`]}:null}
+      // a state said with an action word: "the train is late" -> 遅れています, "my luggage is lost" -> なくなりました
+      const st=STATE[tl];
+      const person=S.an||S.omit&&S.omit!=="it";
+      if(st&&!(st[1]&&st[1]<4&&person)&&!(st[1]>=5&&!person)){
+        const v=byJP(st[0],"v");if(!v)return null;
+        const e=st[1]===2||st[1]===4?(neg?null:vend(v,past&&st[1]===4?"mashita":"mashita")):vend(v,neg?"teinai":past?"teita":"teiru"),pn=st[2]?[C(st[2],st[3]),GA]:[];
+        return e?{chunks:[...pn,...e],used:[v],ga:!st[2]&&st[1]!==6}:null;
+      }
+      // where it is: "near the station" -> 駅の近くです, "on the table" -> テーブルの上にあります, "in Tokyo" -> 東京にいます
+      for(const[re,pw,pk,exist]of LOC){
+        const lm=re.exec(t);if(!lm)continue;
+        const here=/^here$/i.test(lm[1]);if(here&&!pw)return null;
+        const np=here?null:NP(lm[1]);
+        if(!here&&(!np||/^(i|we|he|she)$/.test(np.pron||"")))return null;
+        const box=!pw&&!isPlaceNP(np)&&/^in /i.test(t)&&/(^|,)ph(,|$)/.test((np.used[np.used.length-1]||{}).pos||"");
+        if(!pw&&!isPlaceNP(np)&&!box)return null;   // "in love", "in a hurry": not a place, not built
+        if(box){const live=S.an||S.omit&&S.omit!=="it",be=(live?"い":"あり")+(neg?"ません":past?"ました":"ます");return{chunks:[...np.chunks,C("の"),C("中","なか"),C("に"),C(be)],used:np.used}}
+        const live=S.an||S.omit&&S.omit!=="it",be=(live?"い":"あり")+(neg?"ません":past?"ました":"ます");
+        const head=here?[C("この"),C(pw,pk)]:pw?[...np.chunks,C("の"),C(pw,pk)]:np.chunks;
+        const tail=exist?[C("に"),C(be)]:neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")];
+        return{chunks:[...head,...tail],used:here?[]:np.used};
+      }
+      // "I'm from America" -> アメリカから来ました ; "she is from Japan" -> 日本出身です
+      if((m=/^from (.+)$/i.exec(t))){
+        if(neg||past)return null;const np=NP(m[1]);if(!np||np.pron)return null;
+        if(S.omit==="i"||S.omit==="we")return{chunks:[...np.chunks,C("から"),C("来ました","きました")],used:np.used};
+        const o=byJP("出身","n");return o?{chunks:[...np.chunks,C(o.jp,o.kana),C("です")],used:[...np.used,o]}:null;
+      }
+    }
+    if(PBLOCK.has(tl)||/^(in|on|at|under|near|next|behind|with|from|for|to|of|by|inside|outside|above|below|between|across)\b/i.test(t))return null;
+    const ingw=/^([a-z]+ing)\b/i.exec(t),ingAdj=ingw&&(PREF.adj[ingw[1].toLowerCase()]||window.PICKA&&window.PICKA[ingw[1].toLowerCase()]!=null);
+    let a=ingw&&!ingAdj?null:word(t,"adj",{thing:S.thing,an:S.an,ph:S.ph});
+    if(a&&a.jp==="低い"&&/^(電池|バッテリー|充電)$/.test((S.used[S.used.length-1]||{}).jp)){const b=byJP("少ない","adj");if(b)a=b}   // battery is low: 少ない
     if(a){
       if(/^好き|^嫌い|^欲しい|^必要/.test(a.jp))return null;
       let ch=[];
@@ -496,7 +636,13 @@ function compose(q){
       return{chunks:[...ch,...p],used:[a]};
     }
     if(adv||mode)return null;
-    if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);if(vp&&vp.ing&&!vp.me){const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e&&!neg&&!past)return{chunks:[...vp.pre,...e],used:vp.used}}return null}
+    if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);
+      if(vp&&vp.ing&&!neg&&!past){
+        if(vp.me&&vp.v.kana!=="ついてくる"){   // "the dinosaur is chasing me" -> 恐竜に追いかけられています
+          if(!/(^|,)vt/.test(vp.v.pos)||/(^|,)vs(,|$)/.test(vp.v.pos)||vp.pre.some(ch=>ch[0]==="を")||!S.chunks.length||S.pron&&!/^(he|she)$/.test(S.pron))return null;
+          const e=vend(vp.v,"ukemiteiru");return e?{chunks:[...vp.pre,...e],used:vp.used,agent:true,notes:["Japanese says this as “I am being … by …” rather than using a word for “me”."]}:null}
+        const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e)return{chunks:[...vp.pre,...e],used:vp.used,ga:true}}
+      return null}
     const np=NP(t);if(!np||np.pron==="i")return null;
     return{chunks:[...np.chunks,...(neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")])],used:np.used};
   };
@@ -508,7 +654,41 @@ function compose(q){
   }
   if((m=/^(.+?) (?:is|are) (?:broken|not working)$/i.exec(l))||(m=/^(.+?) (?:does|do|will) not work$/i.exec(l))){
     const np=NP(s.slice(0,m[1].length)),v=byJP("壊れる","v"),e=v&&vend(v,"teiru");
-    return np&&e&&!/^(i|he|she|we)$/.test(np.pron||"")?out([...np.chunks,GA,...e],[...np.used,v]):null;
+    return np&&e&&!/^(i|he|she|we)$/.test(np.pron||"")?out([...dropMy(np.chunks),GA,...e],[...np.used,v]):null;
+  }
+  // --- requests with a fixed shape ---
+  if((m=/^stop ([a-z]+ing\b.*)$/i.exec(l))){   // "stop crying" -> 泣かないでください
+    const vp=VP(s.slice(s.length-m[1].length));if(!vp||!vp.ing||vp.me)return null;
+    const e=vend(vp.v,"naide");return e&&out([...vp.pre,...e],vp.used);
+  }
+  if((m=/^be (quiet|nice|kind|gentle|careful)$/i.exec(l))){   // "be quiet" -> 静かにしてください
+    const k=m[1].toLowerCase();
+    if(k==="careful")return out([C("気をつけて","きをつけて"),C("ください")],[]);
+    const a=byJP(k==="quiet"?"静か":"優しい","adj");if(!a)return null;
+    const st=k==="quiet"?[a.jp+"に",a.kana+"に"]:[a.jp.slice(0,-1)+"く",a.kana.slice(0,-1)+"く"];
+    return out([C(st[0],st[1]),C("して"),C("ください")],[a]);
+  }
+  if(please&&(m=/^no (.+)$/i.exec(l))){   // "no ice please" -> 氷なしでお願いします
+    const np=NP(s.slice(s.length-m[1].length));if(!np||np.pron||np.chunks.some(c=>c[1]==null))return null;
+    return out([...np.chunks,C("なしで"),C("お願いします","おねがいします")],np.used);
+  }
+  if((m=/^(?:one more|another) (.+)$/i.exec(l))){   // "one more beer please" -> ビールをもう一杯お願いします
+    const np=NP(s.slice(s.length-m[1].length));if(!np||np.pron||np.chunks.some(c=>c[1]==null))return null;
+    const n=np.used[np.used.length-1],cup=/^(ビール|水|お水|お茶|コーヒー|紅茶|日本酒|ワイン|ジュース|お酒|酒|牛乳|ミルク|コーラ|ご飯|味噌汁|ハイボール|カクテル)$/.test(n.jp);
+    return out([...np.chunks,O,cup?C("もう一杯","もういっぱい"):C("もう一つ","もうひとつ"),C("お願いします","おねがいします")],np.used,[cup?"もう一杯 = one more glass / cup / bowl.":"もう一つ = one more (of a thing)."]);
+  }
+  if(/^what time is it(?: now)?$/i.test(l))return out([C("今","いま"),C("何時","なんじ"),C("です"),KA],[]);
+  // --- "this smells bad", "this tastes weird" ---
+  if((m=/^(.+?) (smells?|tastes?) (good|nice|great|amazing|delicious|bad|terrible|awful|weird|strange|funny)$/i.exec(l))){
+    const S=subj(m[1]);if(!S||S.omit&&S.omit!=="it")return null;
+    const sm=/^smell/i.test(m[2]),q=m[3].toLowerCase(),good=/^(good|nice|great|amazing|delicious)$/.test(q),bad=/^(bad|terrible|awful)$/.test(q);
+    const n=byJP(sm?"匂い":"味","n");if(!n)return null;
+    let ch,u;
+    if(good&&sm)ch=[C("いい"),C(n.jp,n.kana),GA,C("します")],u=[n];
+    else if(good){const a=byJP("おいしい|美味しい","adj");if(!a)return null;ch=[C(a.jp,a.kana),C("です")];u=[a]}
+    else if(bad){const a=byJP(sm?"臭い:くさい":"まずい|不味い","adj");if(!a)return null;ch=[C(a.jp,a.kana),C("です")];u=[a]}
+    else{const a=byJP("変","adj");if(!a)return null;ch=[C(a.jp+"な",a.kana+"な"),C(n.jp,n.kana),GA,C("します")];u=[a,n]}
+    return out([...S.chunks,...ch,...(isQ?[KA]:[])],[...S.used,...u],[],true);
   }
   // --- questions: "is this wall scary?" ---
   if((m=/^(is|are|was|were) (not )?(.+)$/i.exec(l))&&!/^there /i.test(m[3])&&!/^is it (ok|okay|alright|all right|fine) (to|if i) /i.test(l)){
@@ -516,7 +696,7 @@ function compose(q){
     for(let i=1;i<ws.length;i++){
       const S=subj(ws.slice(0,i).join(" "));if(!S)continue;
       const P=pred(ws.slice(i).join(" "),S,!!m[2],past);if(!P)continue;
-      return out([...S.chunks,...P.chunks,KA],[...S.used,...P.used],[],true);
+      return out([...(P.agent?[...S.chunks.slice(0,-1),C("に")]:S.chunks),...P.chunks,KA],[...S.used,...P.used],P.notes||[],true);
     }
     return null;
   }
@@ -525,22 +705,105 @@ function compose(q){
     const S=subj(m[1]);
     if(S){
       const looks=/^(look|seem)/i.test(m[2]),P=pred(m[4],S,!!m[3],/^w/i.test(m[2]),looks?"looks":null);
-      if(P)return out([...S.chunks,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[],true);
+      if(P&&!S.an)S.chunks=dropMy(S.chunks);   // "my room is messy" -> 部屋が…: Japanese leaves out "my" for your own things
+      const sc=!P?null:P.agent?[...S.chunks.slice(0,-1),C("に")]:P.ga&&!isQ&&!S.omit&&!S.pron&&S.chunks.length&&!T.length?[...S.chunks.slice(0,-1),GA]:S.chunks;
+      if(P)return out([...sc,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],[...(S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[]),...(P.notes||[])],true);
     }
     if(!/^(i|we|you) (am|are) [a-z]+ing\b/i.test(l)&&!/^[a-z]+ing\b/i.test(m[4]))return null;
   }
+  // who does a question: I / you / we are left out, he / she / they are 彼 / 彼女 / 彼ら
+  const whoS=str=>{const t=str.trim().toLowerCase();
+    if(/^(i|we|you)$/.test(t))return{chunks:[],used:[],thing:false};
+    if(/^(he|she|they)$/.test(t))return{chunks:[t==="he"?C("彼","かれ"):t==="she"?C("彼女","かのじょ"):C("彼ら","かれら"),WA],used:[],thing:false};
+    const np=t==="it"?null:NP(str.trim());if(!np||np.pron)return null;
+    return{chunks:[...np.chunks,WA],used:np.used,thing:true}};
+  // --- "why did the chicken cross the road?" -> どうして鶏は道を渡ったんですか ---
+  if((m=/^why (do|does|did|are|is|am) (.+)$/i.exec(l))){
+    const aux=m[1].toLowerCase(),ws=s.slice(s.length-m[2].length).split(" ");
+    for(let i=1;i<ws.length;i++){
+      const S=whoS(ws.slice(0,i).join(" "));if(!S)continue;
+      const rest=ws.slice(i).join(" "),ing=/^[a-z]+ing\b/i.test(rest);
+      if(/^(are|is|am)$/.test(aux)!==ing)continue;
+      const vp=VP(rest);if(!vp||vp.ing!==ing||vp.past||vp.me&&vp.v.kana!=="ついてくる")continue;
+      if(S.thing&&!vp.pre.some(ch=>ch[0]==="を"))viSwap(vp);
+      const e=vplain(vp.v,aux==="did"?"ta":ing&&!/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"teiru":"dict");if(!e)continue;
+      return out([C("どうして"),...S.chunks,...vp.pre,...e,C("ん"),C("です"),KA],[...S.used,...vp.used],["… んですか is the natural way to ask for a reason."]);
+    }
+    return null;
+  }
+  // --- "when does the shop open?" -> 店は何時に開きますか ---
+  if((m=/^(when|what time) (do|does|did|will) (.+)$/i.exec(l))){
+    const aux=m[2].toLowerCase(),wt=/^what/i.test(m[1]),ws=s.slice(s.length-m[3].length).split(" ");
+    for(let i=1;i<ws.length;i++){
+      const S=whoS(ws.slice(0,i).join(" "));if(!S)continue;
+      const vp=VP(ws.slice(i).join(" "));if(!vp||vp.ing||vp.past||vp.me)continue;
+      if(S.thing&&!vp.pre.some(ch=>ch[0]==="を"))viSwap(vp);
+      const clock=wt||/^(開く|閉まる|始まる|終わる|出る|着く|出発|到着|起きる|寝る)$/.test(vp.v.jp);
+      const e=vend(vp.v,aux==="did"?"mashitaka":"masuka");if(!e)continue;
+      return out([...S.chunks,clock?C("何時に","なんじに"):C("いつ"),...vp.pre,...e],[...S.used,...vp.used]);
+    }
+    return null;
+  }
+  // --- "where are you going?" -> どこに行きますか, "where do you live?" -> どこに住んでいますか ---
+  if((m=/^where (do|does|did|are|is) (you|he|she|they) (.+)$/i.exec(l))){
+    const aux=m[1].toLowerCase(),S=whoS(m[2]),rest=s.slice(s.length-m[3].length),ing=/^[a-z]+ing\b/i.test(rest);
+    if(/^(are|is)$/.test(aux)!==ing)return null;
+    const vp=VP(rest);if(!vp||vp.ing!==ing||vp.past||vp.me||vp.pre.some(ch=>ch[0]==="に"||ch[0]==="で"))return null;
+    const mv=/^(行く|来る|帰る|戻る)$/.test(vp.v.jp),live=/^(住む|泊まる)$/.test(vp.v.jp);
+    const e=aux==="did"?vend(vp.v,"mashitaka"):mv?vend(vp.v,"masuka"):live||ing||/^(働く|勉強)$/.test(vp.v.jp)?(vend(vp.v,"teiru")||[null]).concat([KA]):vend(vp.v,"masuka");
+    return e&&e.every(Boolean)?out([...S.chunks,C("どこ"),C(mv||live?"に":"で"),...vp.pre,...e],vp.used):null;
+  }
+  // --- "who is that?" -> あの人は誰ですか ---
+  if((m=/^who (is|are|was) (.+)$/i.exec(l))){
+    const x=m[2].toLowerCase(),past=m[1].toLowerCase()==="was";
+    const head=/^(that|that person)$/.test(x)?[C("あの"),C("人","ひと")]:/^(this|this person)$/.test(x)?[C("この"),C("人","ひと")]:x==="he"?[C("彼","かれ")]:x==="she"?[C("彼女","かのじょ")]:null;
+    const np=head?null:NP(s.slice(s.length-m[2].length));
+    if(!head&&(!np||np.pron))return null;
+    return out([...(head||np.chunks),WA,C("誰","だれ"),past?C("でした"):C("です"),KA],head?[]:np.used);
+  }
+  // --- "what is the password?" -> パスワードは何ですか ---
+  if((m=/^what (?:is|are) (.+)$/i.exec(l))&&!/^(this|that|it|these|those|this one|that one|your|his|her|their|our)\b/i.test(m[1])&&!/\b[a-z]+ing\b/i.test(m[1])){
+    const np=NP(s.slice(s.length-m[1].length));
+    if(np&&!np.pron)return out([...np.chunks,WA,C("何","なん"),C("です"),KA],np.used);
+  }
+  // --- "I want to be rich" -> お金持ちになりたいです ---
+  if((m=/^(?:i|we) (?:want|wanna|would like) to (?:be|become) (?:an? |the )?(.+)$/i.exec(l))){
+    const t=s.slice(s.length-m[1].length),a=word(t,"adj",{thing:null});let ch=null,u=[];
+    if(a&&!/^(好き|嫌い|大好き|欲しい|必要)/.test(a.jp)){
+      if(/adj-ix/.test(a.pos)&&a.jp.endsWith("いい"))ch=[C(a.jp.slice(0,-2)+"よく",a.kana.slice(0,-2)+"よく")];
+      else if(/adj-i/.test(a.pos)&&a.jp.endsWith("い"))ch=[C(a.jp.slice(0,-1)+"く",a.kana.slice(0,-1)+"く")];
+      else if(/adj-na/.test(a.pos))ch=[C(a.jp+"に",a.kana+"に")];u=[a]}
+    else{const np=NP(t);if(np&&!np.pron){ch=[...np.chunks,C("に")];u=np.used}}
+    return ch?out([...ch,C("なりたい"),C("です")],u):null;
+  }
+  // --- "I have a crush on her" -> 彼女のことが好きです ---
+  if((m=/^(?:i|we) have a crush on (.+)$/i.exec(l))){
+    const w=m[1].toLowerCase(),np=w==="him"?{chunks:[C("彼","かれ")],used:[]}:w==="her"?{chunks:[C("彼女","かのじょ")],used:[]}:NP(s.slice(s.length-m[1].length)),a=byJP("好き","adj");
+    if(np&&a&&!np.pron)return out([...np.chunks,C("の"),C("こと"),GA,C(a.jp,a.kana),C("です")],[...np.used,a],["… のことが好き is how people say they like someone."]);
+    return null;
+  }
   // --- fixed shapes with a thing ---
-  const thing=(re,build)=>{const mm=re.exec(l);if(!mm)return undefined;const np=NP(s.slice(s.length-mm[1].length));return np&&!/^(i|he|she|we)$/.test(np.pron||"")?build(np):null};
+  const thing=(re,build)=>{const mm=re.exec(l);if(!mm)return undefined;let np=NP(s.slice(s.length-mm[1].length));
+    if(np&&re.source.startsWith("^(?:i|we)"))np={...np,chunks:dropMy(np.chunks)};   // "I forgot my umbrella" -> 傘を忘れました
+    return np&&!/^(i|he|she|we)$/.test(np.pron||"")?build(np):null};
   const fixed=[
     [/^how much (?:is|are|for) (.+)$/i,np=>out([...np.chunks,WA,C("いくら"),C("です"),KA],np.used)],
     [/^(?:i|we) do not like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,WA,C(a.jp,a.kana),C("じゃない"),C("です")],[...np.used,a])}],
     [/^do you like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,WA,C(a.jp,a.kana),C("です"),KA],[...np.used,a])}],
+    [/^(?:i|we) hate (.+)$/i,np=>{const a=byJP("大嫌い","adj")||byJP("嫌い","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
     [/^(?:i|we) (?:really like|love) (.+)$/i,np=>{const a=byJP("大好き","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
     [/^(?:i|we) like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
     [/^(?:i|we) need (.+)$/i,np=>{const a=byJP("必要","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
-    [/^(?:i|we) (?:have )?lost (.+)$/i,np=>{const v=byJP("なくす|無くす","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,O,...e],[...np.used,v])}],
+    [/^(?:i|we) (?:have )?lost (.+)$/i,np=>{const n=np.used[np.used.length-1]||{};
+      if(/^(試合|ゲーム|勝負|喧嘩|レース|戦い|戦争|選挙|裁判|賭け)$/.test(n.jp)){const v=byJP("負ける","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,C("に"),...e],[...np.used,v])}
+      const v=byJP("なくす|無くす","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,O,...e],[...np.used,v])}],
     [/^(?:i|we) (?:have )?(?:forgot|forgotten) (.+)$/i,np=>{const v=byJP("忘れる","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,O,...e],[...np.used,v])}],
-    [/^(?:i|we) do not have (?:an? |any )?(.+)$/i,np=>out([...np.chunks,GA,C("ありません")],np.used)],
+    [/^(?:i|we) do not have (?:an? |any )?(.+)$/i,np=>out([...np.chunks,GA,C(/(^|,)an(,|$)/.test((np.used[np.used.length-1]||{}).pos||"")?"いません":"ありません")],np.used)],
+    [/^(?:i|we) have (?:an? )?(.+)$/i,np=>{const n=np.used[np.used.length-1]||{};
+      if(n.jp==="二日酔い")return out([...np.chunks,C("です")],np.used);   // "I have a hangover" -> 二日酔いです
+      if(/(^|,)an(,|$)/.test(n.pos||""))return out([...np.chunks,GA,C("います")],np.used);   // people and animals: います
+      if(/^(熱|質問|予約|時間|問題|用事|頭痛|腹痛|予定|夢|アイデア|考え|宿題|仕事|授業|会議|お金|自信|経験|趣味|アレルギー|チャンス|時差ぼけ)$/.test(n.jp))return out([...np.chunks,GA,C("あります")],np.used);
+      return null}],
     [/^(?:i|we) have (.+)$/i,np=>{const v=byJP("持つ","v"),e=v&&vend(v,"teiru");return e&&out([...np.chunks,O,...e],[...np.used,v],["This is “have” for a thing you carry or own. For a reservation, a fever or a question, say … ga arimasu. For people and pets, … ga imasu."])}],
     [/^(.+) (?:is|are) (?:broken|not working)$/i,null],
   ];
@@ -560,7 +823,7 @@ function compose(q){
       if(tail)pre.push(PRON[tail],C("で"));
       vp={v,pre,used:[v],past:false,ing};
     }else{vp=VP(rest);if(!vp||vp.pre.some(ch=>ch[0]==="を"))return null}   // it already has a thing: not a what-question
-    const f=want?"tai":ing?"teiru":aux==="did"?"mashita":"masu";
+    const f=want?"tai":ing?(T.length||vp.used.some(u=>TIME[u.en]!==undefined)?"masu":"teiru"):aux==="did"?"mashita":"masu";
     if(/^(were|was)$/.test(aux))return null;
     const e=vend(vp.v,f);if(!e)return null;
     const S=who==="he"?[C("彼","かれ"),WA]:who==="she"?[C("彼女","かのじょ"),WA]:who==="they"?[C("彼ら","かれら"),WA]:[];
@@ -571,7 +834,7 @@ function compose(q){
   const acts=[
     [/^(?:i|we) do not want to (.+)$/i,"takunai"],[/^(?:i|we) (?:want|wanna|would like) to (.+)$/i,"tai"],
     [/^(?:can|could|may) (?:i|we) (?:please )?(.+)$/i,"temoii"],[/^is it (?:ok|okay|alright|all right|fine) (?:to|if i) (.+)$/i,"temoii"],
-    [/^(?:can|could|would|will) you (?:please )?(.+)$/i,"temorau"],
+    [/^can you (.+)$/i,"canyou"],[/^(?:can|could|would|will) you (?:please )?(.+)$/i,"temorau"],
     [/^(?:please )?do not (.+)$/i,"naide"],[/^please (.+)$/i,"tekudasai"],
     [/^(?:lets|let us) (.+)$/i,"mashou"],[/^shall we (.+)$/i,"mashouka"],
     [/^where (?:can|do|could|should|would) (?:i|we) (.+)$/i,"where"],[/^how (?:do|can|should) (?:i|we) (.+)$/i,"how"],
@@ -588,11 +851,21 @@ function compose(q){
     if(f==="teiru"&&!vp.ing)return null;
     if(f==="teiru"&&/^(行く|来る|帰る|戻る)$/.test(vp.v.jp))f="masu";
     if(f==="plain")f=vp.ing?null:vp.past?"mashita":"masu";
+    if(f==="must"&&/^(おしっこ|うんち|おなら)/.test(vp.v.jp))f="tai";
+    if(f==="masu"&&(/^(昨日|先週|今朝)$/.test((T[0]||[])[0])||vp.pre.some(ch=>/^(昨日|先週|今朝)$/.test(ch[0]))||/^quit\b/i.test(m[1])&&!T.length))f="mashita";   // "yesterday", "I quit my job"
+    if(/^(住む|働く|後悔)$/.test(vp.v.jp)&&!T.length&&!vp.used.some(u=>TIME[u.en]!==undefined)){if(f==="masu")f="teiru";else if(f==="masen")f="teinai"}
     if(!f)return null;
     if(vp.ing&&f!=="teiru"&&f!=="suki")return null;
     if(vp.past&&f!=="mashita")return null;
     if(f==="tekudasai"||(please&&f==="masu"))f="tekudasai";
     let pre=vp.pre,e;
+    if(re.source.includes("(?:i|we)"))pre=dropMy(pre);   // "I lost my passport" -> パスポートをなくしました
+    if(f==="canyou"){
+      const ob=vp.used.length>1?vp.used[vp.used.length-1]:null,hasO=pre.some(ch=>ch[0]==="を");
+      const abil=!hasO&&/^(泳ぐ|踊る|歌う|料理|運転|飛ぶ|走る|スキー|スケート|自転車|泳ぐ)$/.test(vp.v.jp)||ob&&/語$/.test(ob.jp)&&/^(話す|読む|書く)$/.test(vp.v.jp)||ob&&/^(食べる|飲む)$/.test(vp.v.jp)&&!/^(これ|それ|あれ)$/.test(ob.jp);
+      f=abil?"potka":"temorau";
+    }
+    if(/^pot/.test(f)&&vp.v.jp==="見つける"){const w=byJP("見つかる","v");if(w){vp.used[vp.used.indexOf(vp.v)]=w;vp.v=w;f={pot:"masu",potneg:"masen",potka:"masuka"}[f];if(pre.length&&pre[pre.length-1][0]==="を")pre=[...pre.slice(0,-1),GA]}}   // can't find: 見つかりません
     if(f==="where"||f==="how"){
       // "where can I buy a ticket" -> ticket wa doko de kaemasu ka
       const obj=pre.length&&pre[pre.length-1][0]==="を";
@@ -601,22 +874,37 @@ function compose(q){
       return e&&out([...lead,f==="where"?C("どこ"):C("どうやって"),...(f==="where"?[C("で")]:[]),...e],vp.used);
     }
     if(/^pot/.test(f)&&pre.length&&pre[pre.length-1][0]==="を")pre=[...pre.slice(0,-1),GA];   // "can read X": X ga yomemasu
-    e=vend(vp.v,f);
+    e=f==="tekudasai"?order({...vp,pre}):vend(vp.v,f);
     return e&&out([...pre,...e],vp.used,f==="temorau"?["A polite way to ask someone to do something for you."]:[]);
   }
+  // --- talking to someone by name: "Jarvis, open the door" / "Jarvis explode his ballsack" ---
+  {const m2=/^([A-Z][A-Za-z'-]*),? (.+)$/.exec(s)||/^([a-z][a-z'-]*), (.+)$/.exec(s);
+   if(m2&&isName(m2[1])){
+     const rest=m2[2].replace(/^please /i,""),vp=VP(rest);
+     if(vp&&!vp.ing&&!vp.past&&!vp.you&&/^[a-z]/.test(rest)){
+       const e=order(vp);
+       if(e)return out([[m2[1]+"、",null,m2[1]+","],...vp.pre,...e],[{jp:m2[1],kana:null,en:"a name, said as it is"},...vp.used]);
+     }
+   }}
   // --- someone or something else does it: "the dinosaur ate my homework", "my dad is cooking" ---
-  {const ws=l.split(" ");
-   for(let i=1;i<ws.length&&i<=4;i++){
+  {const ws=l.split(" "),w0=ws[0].toLowerCase(),PN={he:C("彼","かれ"),she:C("彼女","かのじょ"),they:C("彼ら","かれら")};
+   // starts with an action word ("drink water", "go to sleep"): an order, not "the drink ..."
+   if(ws.length>=2&&(PREF.v[w0]||window.PICKV&&window.PICKV[w0]!=null)&&!isThing(s)){const vp=VP(s);if(vp&&!vp.ing&&!vp.past&&!vp.you){const e=order(vp);if(e)return out([...vp.pre,...e],vp.used)}}
+   for(let i=Math.min(4,ws.length-1);i>=1;i--){   // longest subject first: "the last train" before "the last"
      const head=ws.slice(0,i).join(" ");
-     if(/^(i|we|you|it|they|he|she|this|that|there|here|what|who|where|how|why|when|which|do|does|did|can|could|will|would|please|lets|is|are|was|were)$/i.test(ws[0]))break;
+     if(/^(i|we|you|it|this|that|there|here|what|who|where|how|why|when|which|do|does|did|can|could|will|would|please|lets|is|are|was|were)$/i.test(w0))break;
+     if(PN[w0]&&i>1)continue;
      let rest=s.slice(head.length).trim(),ing=false;
      const am=/^(is|are|was|were) /i.exec(rest);if(am){if(!/^[a-z]+ing\b/i.test(rest.slice(am[0].length)))continue;ing=true;rest=rest.slice(am[0].length)}
-     const np=NP(s.slice(0,head.length));if(!np||np.pron)continue;
+     const np=PN[w0]?{chunks:[PN[w0]],used:[],pron:w0}:NP(s.slice(0,head.length));if(!np||np.pron&&!PN[w0])continue;
+     // a made-up name subject must be all capitals ("Elon Musk"), so "Bob ate" is not one name
+     if(i>1&&np.chunks.some(c=>c[1]==null)&&!head.split(" ").every(x=>/^[A-Z0-9]/.test(x)||/^(the|a|an|my|your|his|her|our|their)$/i.test(x)))continue;
      const vp=VP(rest);if(!vp||vp.ing!==ing)continue;
+     if(!vp.me&&!vp.pre.some(ch=>ch[0]==="を"))viSwap(vp);   // "the door opened" -> ドアが開きました
      // "the dog bit me": Japanese says "I was bitten by the dog" (犬に噛まれました), not 私を
-     if(vp.me){
+     if(vp.me&&vp.v.kana!=="ついてくる"){
        // only real "do it to someone" verbs (JMdict vt), and not する-nouns (電話されました sounds stiff)
-       if(!vp.past&&!ing||!/(^|,)vt/.test(vp.v.pos)||/(^|,)vs(,|$)/.test(vp.v.pos)||vp.pre.some(ch=>ch[0]==="を"))continue;
+       if(!vp.past&&!ing||!/(^|,)vt/.test(vp.v.pos)||/(^|,)vs(,|$)/.test(vp.v.pos)&&!/^(無視|告白|注意|侮辱|攻撃|招待|誘拐|逮捕|邪魔|説得|誘惑|挑発)$/.test(vp.v.jp)||vp.pre.some(ch=>ch[0]==="を"))continue;
        let v=vp.v;
        if(v.kana==="かく")continue;   // a cat "scratching" you is 引っかく, which the dictionary here lacks: not built
        if(v.jp==="噛む"&&/^(蚊|蜂|ハチ|虫)$/.test(np.used[np.used.length-1].jp)){const st=byJP("刺す","v");if(!st)continue;v=st;vp.used[vp.used.indexOf(vp.v)]=st}   // mosquitoes and bees "sting"
@@ -625,20 +913,23 @@ function compose(q){
      }
      const f=ing?(/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru"):vp.past?"mashita":"masu";
      const e=vend(vp.v,f);if(!e)continue;
-     return out([...np.chunks,GA,...vp.pre,...e],[...np.used,...vp.used]);
+     return out([...np.chunks,PN[w0]?WA:GA,...vp.pre,...e],[...np.used,...vp.used]);
    }}
   // --- "eat this" / "wait here", said as a request ---
-  if(please){const vp=VP(s);if(vp&&!vp.ing&&!vp.past){const e=vend(vp.v,"tekudasai");if(e)return out([...vp.pre,...e],vp.used)}}
+  // a plain command ("explode his ballsack", "open the window"): two words or more, so a single
+  // word like "run" is shown as a word rather than turned into an order
+  if(please||s.split(" ").length>=2&&!isThing(s)){const vp=VP(s);if(vp&&!vp.ing&&!vp.past&&!vp.you){const e=order(vp);if(e)return out([...vp.pre,...e],vp.used)}}
   return null;
 }
+const tone=u=>/(^|,)vulg(,|$)/.test(u.pos||"")?" · rude word":/(^|,)sl(,|$)/.test(u.pos||"")?" · slang / casual word":"";
 function composeHTML(q){
   let r=null;try{r=compose(q)}catch(e){r=null}
   if(!r)return null;
-  const jp=r.chunks.map(c=>c[0]).join(""),rom=r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1]));
+  const jp=r.chunks.map(c=>c[0]).join(""),rom=r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:romaji(c[1]));
   if(rom.some(x=>x==null))return null;
   fillHTML.last=jp;
-  const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}`).join("<br>");
-  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),(()=>{const a=r.chunks.map(c=>c[1]==null?c[0]:sayWord(c[1]));return a.some(x=>x==null)?"":a.join(" ")})())}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
+  const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}${tone(u)}`).join("<br>");
+  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),(()=>{const a=r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:sayWord(c[1]));return a.some(x=>x==null)?"":a.join(" ")})())}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
 }
 // When no sentence could be built: every important word on its own, to point at or say one by one.
 function wordsHTML(q){
@@ -655,7 +946,7 @@ function wordsHTML(q){
     if(x&&x.kind==="dictionary"){const first=gkey((x.en||"").split(/[\/;]/)[0]);if(first!==gkey(w)&&first!==gkey(w).replace(/s$/,"")&&first!==ev.c[0])x=null}   // "even" -> 水平 (level): wrong sense, skip
     if(!x||seen.has(x.jp))continue;seen.add(x.jp);
     const r=x.kana?romaji(x.kana):null;if(!r)continue;
-    rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,sayWord(x.kana)||"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
+    rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,sayWord(x.kana)||"")}<div>${esc(short(x.en,70))}${tone(x)}</div></div>`;n++;
   }
   return n>=1?`<div class="card dict"><div class="where">Word by word · I couldn't build this as one sentence, so here is each word</div>${rows}<div class="tags"><span>words</span></div></div>`:"";
 }
@@ -690,8 +981,8 @@ ${FILL_RULES}`;
 
 // ---------- page furniture ----------
 const css=document.createElement("style");
-css.textContent=`#tabs{display:flex;gap:6px;margin:0 0 8px}
-#tabs button{flex:1;font:inherit;font-size:14px;padding:7px 0;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
+css.textContent=`#tabs{display:flex;gap:8px;margin:0 0 10px}
+#tabs button{flex:1;font:inherit;font-size:15px;min-height:44px;padding:8px 0;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--mute)}
 #tabs button.on{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 #ask{padding-bottom:calc(96px + env(safe-area-inset-bottom))}
 #askbar{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center}
@@ -1096,7 +1387,8 @@ function buildFor(q){
 let lexP=null;
 const lexWait=()=>lexP=lexP||new Promise(ok=>{const t=setInterval(()=>{if(window.DICT){clearInterval(t);ok()}},60)});
 window.__ask={build:buildFor,ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
-  compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
+  compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
+  findNoun,enVerb,VP:s=>VP(s),isName,
   wordsHTML,word:(e,t)=>word(e,t),pref:()=>PREF,byJP,exactSent,
   state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>lexWait(),clear:()=>{history=[]}};
 })();
