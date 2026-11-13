@@ -64,6 +64,13 @@ function findNoun1(w,only){
       if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&tok.tokenize(a.jp).every(t=>t.pos_detail_2==="地域"||t.pos_detail_1==="固有名詞")))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
   return null;
 }
+// the card's guide leaves the gap out ("wah ah-ree-mahss kah"): put the word's guide back where the ~ is in the romaji
+function patSay(e,ws){
+  if(!ws||!e.say)return"";
+  const rw=e.romaji.split(" "),sw=e.say.split(" "),k=rw.indexOf("~");
+  if(k<0||sw.length!==rw.length-1)return"";
+  return[...sw.slice(0,k),ws,...sw.slice(k)].join(" ");
+}
 function fillHTML(letter,word){
   const p=PATTERNS[letter.toUpperCase().charCodeAt(0)-65];if(!p)return null;
   word=word.replace(/\s*[=＝(（].*$/,"").trim();if(!tok||!word||/[ぁ-ヿ一-鿿]/.test(word))return null;   // no word checker, no sentence
@@ -74,7 +81,7 @@ function fillHTML(letter,word){
     // reading comes from the card/dictionary and the hand-written pattern: nothing is guessed
     const wr=n.rom||romaji(n.kana);if(wr==null)return null;
     fillHTML.last=p[0].replace("〜",n.jp);
-    return`<div class="card dict">${label}${ttsBlock(p[0].replace("〜",n.jp),base.e.romaji.replace("~",wr),"")}<div class="en">${en}</div><div class="note">Word used: <span lang="ja">${esc(n.jp)}</span> (${esc(wr)}) = ${esc(n.en)}</div><div class="tags"><span>pattern + word</span></div></div>`;
+    return`<div class="card dict">${label}${ttsBlock(p[0].replace("〜",n.jp),base.e.romaji.replace("~",wr),patSay(base.e,n.say||sayWord(n.kana)))}<div class="en">${en}</div><div class="note">Word used: <span lang="ja">${esc(n.jp)}</span> (${esc(wr)}) = ${esc(n.en)}</div><div class="tags"><span>pattern + word</span></div></div>`;
   }
   // not in the cards or dictionary: names and brands are said as they are
   // only for real names ("Nutella", "Tokyo Dome"): capitalised, and unknown to both the cards and the dictionary
@@ -219,7 +226,7 @@ function dictWord(en,type){
 const NOTNOUN=new Set("you me him her them us it i we they he she what who whom which whose one ones thing things something anything everything nothing someone anyone everyone somebody anybody everybody nobody here there now then that this these those all both each many much more most some any no not yes ok okay very too so".split(" "));
 function npNoun(word){
   const np=NP(word);if(!np||np.pron||np.chunks.length<2||np.chunks.some(c=>c[1]==null))return null;
-  return{jp:np.chunks.map(c=>c[0]).join(""),kana:np.chunks.map(c=>c[1]).join(""),rom:np.chunks.map(c=>romaji(c[1])).join(" "),en:np.used.map(u=>short(u.en,30)).join(" + "),kind:"dictionary"};
+  return{jp:np.chunks.map(c=>c[0]).join(""),kana:np.chunks.map(c=>c[1]).join(""),say:sayAll(np.chunks.map(c=>c[1])),rom:np.chunks.map(c=>romaji(c[1])).join(" "),en:np.used.map(u=>short(u.en,30)).join(" + "),kind:"dictionary"};
 }
 function cardWord(en,type){
   for(const a of rank(en)){if(a[0]<18)break;if(!a[1].f.single)continue;const w=fromCard(a[1],type);if(w)return w}
@@ -386,7 +393,14 @@ function VP(s){
 // ----- whole sentences -----
 const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
 // 'Hello, how do I say "this wall is scary" in Japanese?' -> 'this wall is scary'
+// Text inside quotation marks is the exact sentence the user wants: nothing outside it is used.
+function quoted(q){
+  const m=/["“”„‟«»＂「『]\s*([^"“”„‟«»＂」』]{2,}?)\s*(?:["“”„‟«»＂」』]|$)/.exec(q)||/(?:^|\s)['‘](.{2,}?)['’]\s*[?.!]*\s*(?:in japanese)?\s*[?.!]*$/i.exec(q);
+  return m?m[1].trim():null;
+}
 function cleanQ(q){
+  const inq=quoted(q);
+  if(inq)return inq.replace(/\s+/g," ").replace(/[?!.。]+$/,"").trim();
   return q.trim().replace(/\s+/g," ").replace(/[?!.]+$/,"")
     .replace(/^(?:hello|hi|hey|excuse me|sorry|um|well|ok|okay|so|please tell me)[,!. ]+/i,"")
     .replace(/^(?:how (?:do|can|would|should) (?:i|you|we) (?:say|ask|write)|how to (?:say|ask)|what(?:'s| is) the japanese (?:word )?for|what(?:'s| is)|how do you say|translate|say)\s*(?=["“'‘])/i,"")
@@ -397,7 +411,7 @@ function compose(q){
   if(!tok)return null;wix();if(!JPX)return null;
   let s0=cleanQ(q);
   if(!s0||s0.split(" ").length>10)return null;
-  const isQ=/\?\s*["”']?\s*$/.test(q);
+  const isQ=/\?\s*["”'’」]?\s*$/.test(quoted(q)!=null?(/["“„‟«＂「『'‘]\s*([^"“”„‟«»＂」』]*)/.exec(q)||["",""])[1].replace(/["”’'」』\s]+$/,""):q);
   let please=false;if(/[, ]+please$/i.test(s0)){please=true;s0=s0.replace(/[, ]+please$/i,"")}
   const en=cap(s0)+(isQ?"?":"");
   const l0=s0.replace(/’/g,"'").replace(/\b(it|that|this|he|she|there|what|where|who)'s\b/gi,"$1 is").replace(/\bi'm\b/gi,"i am").replace(/\b(we|they|you)'re\b/gi,"$1 are")
@@ -531,7 +545,7 @@ function composeHTML(q){
   if(rom.some(x=>x==null))return null;
   fillHTML.last=jp;
   const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}`).join("<br>");
-  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),"")}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
+  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),sayAll(r.chunks.map(c=>c[1])))}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
 }
 // When no sentence could be built: every important word on its own, to point at or say one by one.
 function wordsHTML(q){
@@ -544,7 +558,7 @@ function wordsHTML(q){
     if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
     if(!x||seen.has(x.jp))continue;seen.add(x.jp);
     const r=x.kana?romaji(x.kana):null;if(!r)continue;
-    rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
+    rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,sayWord(x.kana)||"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
   }
   return n>=2?`<div class="card dict"><div class="where">Word by word · I couldn't build this as one sentence, so here is each word</div>${rows}<div class="tags"><span>words</span></div></div>`:"";
 }
@@ -789,6 +803,39 @@ function romaji(k){
   }
   return o;
 }
+// "Say it like" guide (koh-nee-chee-wah) for one spoken word in kana.
+// Same rules as tools/kana.py say_word, which makes the guides on the hand-written cards.
+function sayWord(k){
+  k=hira(k);const m=[];
+  for(let i=0;i<k.length;i++){
+    const c=k[i],n=k[i+1];
+    if(c==="っ"){m.push("Q");continue}
+    if(c==="ん"){m.push("N");continue}
+    if(c==="ー"){const p=[...m].reverse().find(x=>/[aiueo]$/.test(x));if(!p)return null;m.push(p.slice(-1));continue}
+    if(n&&Y[n]&&R[c]&&/i$/.test(R[c])&&c!=="い"){const b=R[c];m.push((/^(sh|ch|j)/.test(b)?b.slice(0,-1):b.slice(0,-1)+"y")+Y[n]);i++;continue}
+    if(n&&"ぁぃぅぇぉ".includes(n)&&(c==="ふ"||c==="て"||c==="で"||c==="う"||c==="ゔ")){m.push(({ふ:"f",て:"t",で:"d",う:"w",ゔ:"v"})[c]+R[n]);i++;continue}
+    if(R[c]==null)return null;
+    m.push(R[c]);
+  }
+  const SAY={a:"ah",i:"ee",u:"oo",e:"eh",o:"oh"},close=s=>s.endsWith("eh")?s.slice(0,-1):s,syl=[];
+  for(let i=0;i<m.length;){
+    const t=m[i],nx=m[i+1]||"";
+    if(t==="Q"){if(syl.length&&nx&&nx!=="Q"&&nx!=="N")syl[syl.length-1]=close(syl[syl.length-1])+(/^(ch|ts)/.test(nx)?"t":/^sh/.test(nx)?"sh":nx[0]);i++;continue}
+    if(t==="N"){if(syl.length)syl[syl.length-1]=close(syl[syl.length-1])+"n";else syl.push("n");i++;continue}
+    const v=t.slice(-1),c=t.slice(0,-1),nv=/^[aiueo]$/.test(nx)?nx:"";
+    if((t==="de"||t==="ma")&&nx==="su"&&i+2===m.length){syl.push(t==="de"?"dess":"mahss");i+=2;continue}
+    if((t==="de"||t==="ma")&&nx==="shi"&&m[i+2]==="ta"){syl.push(t==="de"?"desh":"mahsh","tah");i+=3;continue}
+    if(nv){const p=v+nv;
+      if(["aa","ii","uu","ee","oo","ou"].includes(p)){syl.push(c+SAY[v]);i+=2;continue}
+      if(p==="ei"){syl.push(c+"ay");i+=2;continue}
+      if(p==="ai"){syl.push(c+"ai");i+=2;continue}
+      if(p==="oi"){syl.push(c+"oy");i+=2;continue}
+    }
+    syl.push(c+SAY[v]);i++;
+  }
+  return syl.join("-");
+}
+const sayAll=kanas=>{const a=kanas.map(k=>k==null?null:sayWord(k));return a.some(x=>x==null)?"":a.join(" ")};
 // 何 + counter: these readings are regular and safe (rendaku checked by hand)
 const NAN={"分":"ぷん","時":"じ","時間":"じかん","人":"にん","個":"こ","本":"ぼん","枚":"まい","回":"かい","歳":"さい","円":"えん","日":"にち","階":"がい","番":"ばん","名":"めい","泊":"ぱく","駅":"えき","月":"がつ","杯":"ばい","匹":"びき","冊":"さつ","台":"だい","件":"けん","週間":"しゅうかん","年":"ねん","度":"ど","番線":"ばんせん","号車":"ごうしゃ"};
 const FREE=new Set(["助詞","助動詞","記号","接頭詞"]);
@@ -831,7 +878,7 @@ function check(jp){
   if(!grp.length)return{bad:"it was empty"};
   const rom=[];
   for(const g of grp){const r=romaji(g);if(r==null)return{bad:"I couldn't confirm the reading"};rom.push(r)}
-  return{jp:jp.replace(/。$/,""),romaji:rom.join(" "),warn};
+  return{jp:jp.replace(/。$/,""),romaji:rom.join(" "),say:sayAll(grp),warn};
 }
 
 // ---------- chat ----------
@@ -876,7 +923,7 @@ function render(text,items,allowSay,already){
     if(!allowSay||says>=2||usedJP.has(norm(jp)))continue;says++;   // only the online AI may offer its own sentencesusedJP.add(norm(jp));
     const c=check(jp);
     if(c.bad){if(!bads++){html+=`<div class="ainote">The AI wrote a sentence, but ${esc(c.bad)}, so I'm not showing it. Try asking in simpler words, or use Search.</div>`;shown++}continue}
-    html+=`<div class="card dict"><div class="where">AI-made sentence · every word was checked against the dictionary, but no person has checked the sentence</div>${ttsBlock(c.jp,c.romaji,"")}<div class="en">${esc(en)}</div>${c.warn.length?`<div class="note">Not in the dictionary (probably a name or borrowed word): ${esc(c.warn.join(", "))}</div>`:""}<div class="tags"><span class="careful">AI-made</span></div></div>`;
+    html+=`<div class="card dict"><div class="where">AI-made sentence · every word was checked against the dictionary, but no person has checked the sentence</div>${ttsBlock(c.jp,c.romaji,c.say||"")}<div class="en">${esc(en)}</div>${c.warn.length?`<div class="note">Not in the dictionary (probably a name or borrowed word): ${esc(c.warn.join(", "))}</div>`:""}<div class="tags"><span class="careful">AI-made</span></div></div>`;
     shown++;
   }
   if(!shown)html=`<div class="ainote">I'm not sure how to help with that one. Try the Search tab, or ask in different words.</div>`;
@@ -895,12 +942,15 @@ async function send(q){
   const out=document.createElement("div");out.innerHTML=`<div class="ainote dots">Looking it up</div>`;log.appendChild(out);
   you.scrollIntoView({block:"start",behavior:"smooth"});
   try{
-    const items=retrieve(q);
+    const core=quoted(q);   // text in quotes is the whole sentence to look for
+    const items=retrieve(core||q);
     const ctx=items.length?items.map(itemText).join("\n"):"(no matching entries)";
     const msgs=[{role:"system",content:SYSTEM}];
     history.slice(-2).forEach(h=>msgs.push({role:"user",content:"QUESTION: "+h.q},{role:"assistant",content:h.a}));
     msgs.push({role:"user",content:`PHRASEBOOK ENTRIES:\n${ctx}\n\nQUESTION: ${q}`});
-    await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,8000))]);
+    // the word checker is needed to build sentences: wait for it (it loads once, in a few seconds)
+    if(!tok){out.innerHTML=`<div class="ainote dots">Getting ready</div>`;await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,25000))])}
+    const noTok=!tok?`<div class="ainote">The sentence builder could not load, so I can only show cards for now. Close and reopen the app to try again.</div>`:"";
     fillHTML.last=null;
     // a hand-written sentence that says exactly this wins over anything built
     const same=exactSent(q);
@@ -916,8 +966,8 @@ async function send(q){
     if(text==null){
       const skip=same?same.x.e.jp:null;
       const cards=items.filter(it=>it.kind!=="dict"&&itemCard(it).e.jp!==skip).slice(0,built?1:2);
-      const wordsH=built?"":wordsHTML(q);
-      out.innerHTML=built+wordsH+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.</div>`:"")+
+      const wordsH=built?"":wordsHTML(core||q);
+      out.innerHTML=noTok+built+wordsH+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.</div>`:"")+
         (cards.length?`<div class="aimeta">${built||wordsH?"Related":"Closest"} hand-written card${cards.length>1?"s":""}:</div>`+cards.map(it=>{const c=itemCard(it);return(it.kind==="sent"?`<div class="aimeta">Found on this card: <b lang="ja">${esc(it.o.b.jp)}</b> = ${esc(it.o.b.en)}</div>`:"")+cardHTML(c.e,c.where)}).join("")
           :built||wordsH?"":`<div class="ainote">I found nothing for that. Try shorter, simpler words, or the Search tab.</div>`);
       window.__lastAI={q,ctx,text:null,by:"no AI"};
