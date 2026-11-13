@@ -262,7 +262,7 @@ function dictLookup(raw){
   const q=gkey(raw),have=new Set(ENTRIES.map(x=>x.e.jp));
   let a=(DIX.get(q)||[]).concat(DIX.get(q.replace(/s$/,""))||[],DIX.get("="+raw)||[],(raw.length>=4?DIX.get("="+raw.replace(/[^a-z]/g,"")):null)||[]);
   const seen=new Set();
-  return a.sort((x,y)=>x[0]-y[0]||D[y[1]][5]-D[x[1]][5]).filter(x=>!seen.has(x[1])&&seen.add(x[1])).map(x=>D[x[1]]).filter(d=>!have.has(d[0])).slice(0,2);
+  return a.sort((x,y)=>x[0]-y[0]||(D[x[1]][7]==null?999:D[x[1]][7])-(D[y[1]][7]==null?999:D[y[1]][7])).filter(x=>!seen.has(x[1])&&seen.add(x[1])).map(x=>D[x[1]]).filter(d=>!have.has(d[0])).slice(0,2);
 }
 const ttsBlock=(jp,rom,say)=>`<div class="jp tts" data-tts="${esc(jp)}" lang="ja">${esc(jp)}</div><div class="rom"><b>${esc(rom)}</b>${say?` · <span class="say">${esc(say)}</span>`:""}</div>`;
 const FILL=[["はありますか"," wa arimasu ka"," wah ah-ree-mahss kah",w=>`Do you have ${w}? / Is there ${w}?`],

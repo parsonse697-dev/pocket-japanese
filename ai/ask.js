@@ -1,19 +1,16 @@
-// Pocket Japanese: the optional "Ask AI" tab.
+// Pocket Japanese: the "Ask" tab.
 //
-// Trust design (the model is small and CAN be wrong, so the app polices it):
-//   1. Lookup first: the question is run through the normal phrasebook search
-//      and the model only gets those hand-written cards + dictionary entries.
-//   2. The model answers with three line types only: CARD n / SAY jp = en / NOTE text.
-//      CARD shows the real card (recorded audio). Nothing else it prints is shown.
-//   3. A SAY sentence is split into words (kuromoji) and every word must exist
-//      in the dictionary or the hand-written phrases, otherwise it is not shown.
-//   4. Romaji is generated from the dictionary reading, never taken from the model.
+// No AI is needed. A question is answered in this order:
+//   1. Lookup: the closest hand-written cards and sentences.
+//   2. Patterns: common question shapes -> a hand-written pattern + one word.
+//   3. Grammar rules (compose.js, spliced in below): simple sentences built from
+//      card/dictionary words with the regular polite endings.
+//   4. Otherwise: each word on its own.
+// Optional extra: Google Gemini with the user's own key. Its sentences are word-checked
+// and labelled AI-made. Small on-device models were removed: they could only pick
+// cards (which step 1 already does) and they crashed phones.
 (function(){
 "use strict";
-const IOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-const MODELS={
-  small:{id:"Qwen3.5-2B-q4f16_1-MLC",lib:"ai/Qwen3.5-2B-q4f16_1_cs1k-webgpu.wasm",size:"1.1 GB"},
-  big:{id:"Qwen3.5-4B-q4f16_1-MLC",lib:"ai/Qwen3.5-4B-q4f16_1_cs1k-webgpu.wasm",size:"2.4 GB"}};
 // ---------- pattern + word ("FILL") ----------
 // Hand-picked patterns from the phrasebook whose gap takes a plain thing or place.
 // The AI names a pattern letter and an ENGLISH word; the app finds the Japanese
@@ -43,26 +40,26 @@ ${PLIST}
 
 FILL <letter> <English word> -> use when the user wants exactly one of these patterns with a specific thing or place in the gap. Write the word in ENGLISH; the app finds the Japanese. Examples: "do you have a blanket" -> FILL A blanket. "does this bus go to Kyoto station" -> FILL P Kyoto station. Only for things and places, never for actions.`;
 const isNounJP=jp=>!!tok&&!/[〜~\/\s]/.test(jp)&&tok.tokenize(jp).every(t=>t.pos==="名詞"||t.pos==="接頭詞");
-// hand-written cards win over the dictionary, for the plural form as well ("onions" -> the 玉ねぎ card)
+// order: the everyday word list, then hand-written cards, then the dictionary; plural forms too
 function findNoun(w){
-  const forms=[...new Set([w,w.trim().replace(/(es|s)$/,""),w.trim().replace(/s$/,"")])].filter(Boolean);
+  const base=w.toLowerCase().normalize("NFKC").replace(/[.?!"“”]/g,"").trim().replace(/^(a|an|the|some|any|my|your|this|that) /,"");
+  if(!base||base.startsWith("to ")||NOTNOUN.has(base))return null;   // "to go", "to eat": actions don't fit these patterns
+  const forms=[...new Set([base,base.replace(/ies$/,"y"),base.replace(/(es|s)$/,""),base.replace(/s$/,"")])].filter(Boolean);
+  for(const f of forms){const P=PREF.n[f];if(P){const n=byJP(P,"n");if(n)return n}}
   for(const f of forms){const n=findNoun1(f,"card");if(n)return n}
   for(const f of forms){const n=findNoun1(f,"dict");if(n)return n}
   return null;
 }
 function findNoun1(w,only){
-  w=w.toLowerCase().normalize("NFKC").replace(/[.?!"“”]/g,"").trim().replace(/^(a|an|the|some|any|my|your|this|that) /,"");
-  if(!w||w.startsWith("to "))return null;   // "to go", "to eat": actions don't fit these patterns
   const r=only==="dict"?null:rank(w).find(a=>a[0]>=18&&a[1].f.single&&isNounJP(a[1].e.jp));
   if(r)return{jp:r[1].e.jp,kana:r[1].e.kana,en:r[1].e.en,kind:"card"};
   if(only==="card")return null;
-  // dictionary: prefer the everyday native word over a katakana loanword (玉ねぎ before オニオン)
-  const ds=dictLookup(w).filter(d=>d[5]&&isNounJP(d[0])),d=ds.find(d=>!/^[ァ-ヶー]+$/.test(d[0]))||ds[0];
-  if(d)return{jp:d[0],kana:d[1],en:d[4].split(/[\/;]/)[0].trim(),kind:"dictionary"};
+  const d=dictWord(w,"n");
+  if(d&&isNounJP(d.jp))return d;
   // two words like "kyoto station": try the pieces as one Japanese compound (京都 + 駅)
   const ps=w.split(" ");
   // only when the result is a known word, or a place name + 駅 (station)
-  if(ps.length===2){const a=findNoun1(ps[0]),b=findNoun1(ps[1]);
+  if(ps.length===2){const a=findNoun(ps[0]),b=findNoun(ps[1]);
     if(a&&b){const j=a.jp+b.jp;vocab();
       if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&tok.tokenize(a.jp).every(t=>t.pos_detail_2==="地域"||t.pos_detail_1==="固有名詞")))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
   return null;
@@ -70,12 +67,12 @@ function findNoun1(w,only){
 function fillHTML(letter,word){
   const p=PATTERNS[letter.toUpperCase().charCodeAt(0)-65];if(!p)return null;
   word=word.replace(/\s*[=＝(（].*$/,"").trim();if(!tok||!word||/[ぁ-ヿ一-鿿]/.test(word))return null;   // no word checker, no sentence
-  const n=findNoun(word),label=`<div class="where">Built by the app: a hand-written pattern + a ${n?n.kind:""} word · the whole sentence was not checked by a person</div>`;
+  const n=findNoun(word)||npNoun(word),label=`<div class="where">Built by the app: a hand-written pattern + a ${n?n.kind:""} word · the whole sentence was not checked by a person</div>`;
   const en=esc(p[1].split("___").join(word));
   const base=ENTRIES.find(x=>x.e.jp===p[0]);if(!base)return null;
   if(n){
     // reading comes from the card/dictionary and the hand-written pattern: nothing is guessed
-    const wr=romaji(n.kana);if(wr==null)return null;
+    const wr=n.rom||romaji(n.kana);if(wr==null)return null;
     fillHTML.last=p[0].replace("〜",n.jp);
     return`<div class="card dict">${label}${ttsBlock(p[0].replace("〜",n.jp),base.e.romaji.replace("~",wr),"")}<div class="en">${en}</div><div class="note">Word used: <span lang="ja">${esc(n.jp)}</span> (${esc(wr)}) = ${esc(n.en)}</div><div class="tags"><span>pattern + word</span></div></div>`;
   }
@@ -110,9 +107,7 @@ const RULES=[
   ["D",/\b(?:i|we)(?:'d| would) like (?:an? |some |the |another )?(.+)/i],
   ["E",/\b(?:i|we) want (?:an? |some |the |another )?(.+)/i]];
 function ruleFill(q){
-  const s=q.trim().replace(/[?!.]+$/,"")
-    .replace(/^(?:how (?:do|can|would|should) (?:i|you|we) (?:say|ask)|how to (?:say|ask)|what(?:'s| is) the japanese for|how do you say)\s*(?:if|whether|for|that|:)?\s*/i,"")
-    .replace(/^["“']|["”']$/g,"").replace(/\s+in japanese$/i,"");
+  const s=cleanQ(q);
   for(const[L,re]of RULES){
     const m=re.exec(s);if(!m)continue;
     const w=m[1].replace(/[,.]? please$/i,"").replace(/\s+(?:here|around here|near here|nearby|for me|today|now|right now)$/i,"").replace(/["”']$/,"").trim();
@@ -120,6 +115,438 @@ function ruleFill(q){
     return fillHTML(L,w);
   }
   return null;
+}
+
+// ---------- sentence builder 2: grammar rules + words by type ----------
+// Builds simple sentences ("this wall is scary", "I want to buy a ticket") from
+// fixed grammar rules. Every Japanese word and its reading comes from a card or
+// the dictionary; the rules only add the regular polite endings. Anything the
+// rules do not clearly cover is NOT built (the cards and a word list are shown).
+let WIX=null,JPX=null;
+function wix(){
+  if(WIX)return WIX;
+  if(!window.DICT)return new Map();
+  WIX=new Map();JPX=new Map();
+  window.DICT.forEach(d=>{
+    if(!JPX.has(d[0]))JPX.set(d[0],d);
+    d[4].split(";").forEach((sn,si)=>sn.split("/").forEach((g,gi)=>{const k=gkey(g);if(!k)return;let a=WIX.get(k);if(!a)WIX.set(k,a=[]);a.push([si*3+gi,d])}))});
+  return WIX;
+}
+const isAdj=d=>/adj-(i|na|no)/.test(d[6]||""),isVerb=d=>/(^|,)(v1|v5|vk|vs)/.test(d[6]||"")&&!/vs-s|v1-s/.test(d[6]);
+const okType=(d,t)=>t==="any"?true:t==="adj"?isAdj(d):t==="v"?isVerb(d):!!d[5];
+const gloss=d=>d[4].split(";")[0].trim();
+// a Japanese word we name ourselves: it must exist in the dictionary or on a card,
+// and its reading and word type are taken from there
+function byJP(alts,type){
+  wix();if(!JPX)return null;
+  for(const jp of alts.split("|")){
+    const d=JPX.get(jp);
+    if(d&&okType(d,type))return{jp:d[0],kana:d[1],pos:d[6]||"",en:gloss(d),kind:"dictionary"};
+    const x=ENTRIES.find(x=>x.e.jp===jp&&x.f.single);
+    if(x){const w=fromCard(x,type);if(w)return w}
+  }
+  return null;
+}
+function fromCard(x,type){
+  const jp=x.e.jp,kana=x.e.kana;wix();if(!JPX)return null;
+  let d=JPX.get(jp);
+  if(!d&&tok&&type==="v"){const ts=tok.tokenize(jp);   // cards give verbs in the polite form: 行きます -> 行く
+    if(ts.length&&ts[0].pos==="動詞"&&ts.slice(1).every(t=>t.pos==="助動詞"))d=JPX.get(ts[0].basic_form)}
+  if(d)return okType(d,type)?{jp:d[0],kana:d[1],pos:d[6]||"",en:x.e.en,kind:"card"}:null;
+  if(!tok||!kana)return null;
+  const ts=tok.tokenize(jp);
+  if(type==="adj"&&ts.length===1){
+    if(ts[0].pos==="形容詞"&&ts[0].basic_form===jp&&jp.endsWith("い"))return{jp,kana,pos:"adj-i",en:x.e.en,kind:"card"};
+    if(ts[0].pos_detail_1==="形容動詞語幹")return{jp,kana,pos:"adj-na",en:x.e.en,kind:"card"};
+  }
+  return null;
+}
+// The usual word for very common meanings (so "big" is always 大きい, not a rarer
+// synonym). Each one is looked up, never trusted blindly: see byJP.
+const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",home:"家",bag:"かばん|鞄",soup:"スープ",chair:"椅子|いす",table:"テーブル",desk:"机",bed:"ベッド",key:"鍵",money:"お金",
+  car:"車",bike:"自転車",bicycle:"自転車",train:"電車",bus:"バス",taxi:"タクシー",plane:"飛行機",airplane:"飛行機",boat:"船",ship:"船",station:"駅",airport:"空港",hotel:"ホテル",shop:"店",store:"店",
+  restaurant:"レストラン",hospital:"病院",pharmacy:"薬局",school:"学校",bank:"銀行","post office":"郵便局",park:"公園",temple:"お寺|寺",shrine:"神社",castle:"城",museum:"博物館",library:"図書館",
+  toilet:"トイレ",bathroom:"トイレ",restroom:"トイレ",water:"水",tea:"お茶",coffee:"コーヒー",beer:"ビール",food:"食べ物",rice:"ご飯",bread:"パン",meat:"肉",fish:"魚",egg:"卵",vegetable:"野菜",fruit:"果物",
+  book:"本",phone:"電話",smartphone:"スマホ",photo:"写真",picture:"写真",map:"地図",wallet:"財布",passport:"パスポート",umbrella:"傘",hat:"帽子",shoe:"靴",shoes:"靴",clothes:"服",shirt:"シャツ",towel:"タオル",
+  medicine:"薬",doctor:"医者",friend:"友達",family:"家族",child:"子供",kid:"子供",man:"男の人",woman:"女の人",person:"人",people:"人",teacher:"先生",student:"学生",dog:"犬",cat:"猫",bird:"鳥",
+  tree:"木",flower:"花",mountain:"山",river:"川",sea:"海",ocean:"海",beach:"ビーチ",sky:"空",rain:"雨",snow:"雪",wind:"風",weather:"天気",fire:"火",road:"道",street:"通り",bridge:"橋",building:"建物",
+  town:"町",city:"街",country:"国",world:"世界",movie:"映画",film:"映画",music:"音楽",song:"歌",game:"ゲーム",plate:"皿",dish:"皿",knife:"ナイフ",spoon:"スプーン",fork:"フォーク",chopsticks:"箸",
+  trash:"ゴミ",garbage:"ゴミ",floor:"床",stairs:"階段",elevator:"エレベーター",exit:"出口",entrance:"入口|入り口",price:"値段",size:"サイズ",color:"色",colour:"色",sound:"音",noise:"音",smell:"匂い",taste:"味",
+  name:"名前",time:"時間",night:"夜",morning:"朝",work:"仕事",job:"仕事",question:"質問",problem:"問題",place:"場所",word:"言葉",language:"言語",japanese:"日本語",english:"英語",japan:"日本",
+  bath:"お風呂|風呂",shower:"シャワー",luggage:"荷物",baggage:"荷物",suitcase:"スーツケース",receipt:"レシート",menu:"メニュー",seat:"席","air conditioner":"エアコン",tv:"テレビ",television:"テレビ",
+  computer:"パソコン",charger:"充電器",battery:"電池",head:"頭",stomach:"お腹",tooth:"歯",teeth:"歯",hand:"手",foot:"足",leg:"足",eye:"目",ear:"耳",throat:"喉",back:"背中",hair:"髪",face:"顔",
+  ramen:"ラーメン",sushi:"寿司",sake:"日本酒",alcohol:"お酒",juice:"ジュース",milk:"牛乳",sugar:"砂糖",salt:"塩",ice:"氷",glass:"グラス",bottle:"瓶",box:"箱",paper:"紙",pen:"ペン",card:"カード",
+  ticket:"チケット",blanket:"毛布",pillow:"枕",soap:"石鹸|せっけん",garden:"庭",sun:"太陽",moon:"月",star:"星",animal:"動物",temperature:"温度",fever:"熱",cold:"風邪",pain:"痛み"},
+ adj:{big:"大きい",large:"大きい",small:"小さい",little:"小さい",tiny:"小さい",spicy:"辛い",expensive:"高い",pricey:"高い",cheap:"安い",tall:"高い",high:"高い",low:"低い",
+  good:"いい",nice:"いい",great:"すごい",amazing:"すごい",awesome:"すごい",bad:"悪い",new:"新しい",old:"古い",fast:"速い|早い",quick:"速い|早い",early:"早い",slow:"遅い",late:"遅い",near:"近い",close:"近い",far:"遠い",
+  delicious:"おいしい|美味しい",tasty:"おいしい|美味しい",yummy:"おいしい|美味しい",cute:"かわいい|可愛い",pretty:"きれい|綺麗|奇麗",beautiful:"きれい|綺麗|奇麗",clean:"きれい|綺麗|奇麗",dirty:"汚い",
+  quiet:"静か",noisy:"うるさい",loud:"うるさい",busy:"忙しい",fun:"楽しい",enjoyable:"楽しい",interesting:"面白い",funny:"面白い",boring:"つまらない",difficult:"難しい",hard:"難しい",easy:"簡単",simple:"簡単",
+  heavy:"重い",light:"軽い",long:"長い",short:"短い",wide:"広い",spacious:"広い",narrow:"狭い",cramped:"狭い",strong:"強い",weak:"弱い",sweet:"甘い",salty:"しょっぱい|塩辛い",bitter:"苦い",sour:"酸っぱい|すっぱい",
+  safe:"安全",dangerous:"危ない",scary:"怖い",frightening:"怖い",cool:"かっこいい",strange:"変",weird:"変",odd:"変",famous:"有名",convenient:"便利",handy:"便利",kind:"優しい",gentle:"優しい",
+  sleepy:"眠い",painful:"痛い",sore:"痛い",happy:"嬉しい",glad:"嬉しい",sad:"悲しい",lonely:"寂しい",warm:"暖かい",bright:"明るい",dark:"暗い",soft:"柔らかい",thick:"厚い",thin:"薄い",young:"若い",
+  important:"大切",popular:"人気",rare:"珍しい",unusual:"珍しい",wonderful:"素敵",lovely:"素敵",terrible:"ひどい|酷い",awful:"ひどい|酷い",perfect:"完璧",correct:"正しい",
+  hot:c=>c&&c.thing?"熱い":"暑い",cold:c=>c&&c.thing?"冷たい":"寒い",fine:"大丈夫",okay:"大丈夫",ok:"大丈夫",smelly:"臭い",stinky:"臭い",embarrassing:"恥ずかしい",embarrassed:"恥ずかしい",
+  necessary:"必要",impossible:"無理",complicated:"複雑",polite:"丁寧",rude:"失礼",special:"特別",fresh:"新鮮",comfortable:"快適",cheerful:"明るい"},
+ v:{go:"行く",come:"来る",eat:"食べる",drink:"飲む",see:"見る",watch:"見る","look at":"見る",buy:"買う",use:"使う",read:"読む",write:"書く",speak:"話す",talk:"話す","listen to":"聞く",listen:"聞く",hear:"聞く",
+  sleep:"寝る",wait:"待つ","wait for":"待つ",walk:"歩く",run:"走る",sit:"座る","sit down":"座る",stand:"立つ","stand up":"立つ",open:"開ける",close:"閉める",shut:"閉める",pay:"払う",try:"試す",
+  wear:"着る","put on":"着る",meet:"会う","go home":"帰る","go back":"帰る","come back":"戻る",return:"帰る",study:"勉強",work:"働く",play:"遊ぶ",swim:"泳ぐ",sing:"歌う",rest:"休む",
+  send:"送る",show:"見せる",teach:"教える",tell:"教える",enter:"入る","go in":"入る","go into":"入る","go out":"出かける",ride:"乗る","get on":"乗る","get off":"降りる",wash:"洗う",cut:"切る",borrow:"借りる",rent:"借りる",lend:"貸す",
+  find:"見つける",lose:"なくす|無くす",forget:"忘れる",remember:"覚える",learn:"習う",change:"変える",choose:"選ぶ",pick:"選ぶ",help:"手伝う",carry:"持つ",hold:"持つ",climb:"登る|上る",start:"始める",begin:"始める",
+  stay:"泊まる",touch:"触る","try on":"試着",order:"注文",reserve:"予約",book:"予約",cancel:"キャンセル",check:"確認",confirm:"確認",charge:"充電",exchange:"交換",call:"電話",phone:"電話",
+  "wake up":"起きる","get up":"起きる",sell:"売る",cook:"料理",drive:"運転",travel:"旅行",shop:"買い物","go shopping":"買い物",smoke:"吸う",throw:"捨てる","throw away":"捨てる",
+  push:"押す",press:"押す",pull:"引く",stop:"止まる",hurry:"急ぐ",ask:"聞く",answer:"答える",practice:"練習",explain:"説明",translate:"翻訳",repeat:"繰り返す",bring:"持ってくる|持って来る",
+  "pick up":"拾う",search:"探す","look for":"探す","search for":"探す",die:"死ぬ",laugh:"笑う",cry:"泣く",dance:"踊る",fly:"飛ぶ",win:"勝つ",lose2:"負ける",join:"参加",clean:"掃除",fix:"直す",repair:"直す",
+  "take a photo":"撮る","take a picture":"撮る","take photos":"撮る","take pictures":"撮る","take a shower":"浴びる","take a bath":"入る","take a break":"休む","take a rest":"休む"}};
+const FIXOBJ={"take a photo":"写真","take a picture":"写真","take photos":"写真","take pictures":"写真","take a shower":"シャワー","take a bath":"お風呂|風呂"};
+// English verbs whose Japanese depends too much on the situation to build safely
+const VBLOCK=new Set("be have get do make take put set let keep feel become seem think know say want like need mean turn give leave miss mind care would could should will can may might must am is are was were love hate hope wish look".split(" "));
+const NIOBJ=new Set(["会う","乗る","入る","触る","登る","座る","着く","行く","来る","帰る","戻る","泊まる","住む","電話","参加","勝つ","負ける"]);
+const GAOBJ=new Set(["わかる","分かる","できる","出来る","見える","聞こえる"]);
+const NOPOT=new Set(["わかる","分かる","できる","出来る","ある","いる","見える","聞こえる"]);
+// states that English says with "is ..." but Japanese says with a verb: left to the hand-written cards
+const PBLOCK=new Set("tired hungry thirsty lost broken crowded open closed full ready married sick ill drunk here there late gone done finished over sure sorry right wrong left welcome back home out in on off up down single alone free available busy2 healthy shy uncomfortable worried excited bored interested scared afraid surprised confused angry mad nervous annoyed".split(" "));
+// Dictionary choice: the word must list this meaning among its first ones, and of
+// those the most commonly used word wins (壁 before 塀 for "wall"). Meaning match
+// only: a look-alike romaji spelling never counts.
+function dictWord(en,type){
+  const rows=(wix().get(gkey(en))||[]).filter(r=>r[0]<=2&&okType(r[1],type)&&!/(^|,)x$/.test(r[1][6]||""));
+  if(!rows.length)return null;
+  const sc=r=>r[0]*25+Math.min(r[1][7]==null?999:r[1][7],600);
+  rows.sort((a,b)=>sc(a)-sc(b));
+  if((rows[0][1][7]==null?999:rows[0][1][7])>560)return null;   // too rare to trust without a person checking
+  const d=rows[0][1];return{jp:d[0],kana:d[1],pos:d[6]||"",en:gloss(d),kind:"dictionary"};
+}
+const NOTNOUN=new Set("you me him her them us it i we they he she what who whom which whose one ones thing things something anything everything nothing someone anyone everyone somebody anybody everybody nobody here there now then that this these those all both each many much more most some any no not yes ok okay very too so".split(" "));
+function npNoun(word){
+  const np=NP(word);if(!np||np.pron||np.chunks.length<2||np.chunks.some(c=>c[1]==null))return null;
+  return{jp:np.chunks.map(c=>c[0]).join(""),kana:np.chunks.map(c=>c[1]).join(""),rom:np.chunks.map(c=>romaji(c[1])).join(" "),en:np.used.map(u=>short(u.en,30)).join(" + "),kind:"dictionary"};
+}
+function cardWord(en,type){
+  for(const a of rank(en)){if(a[0]<18)break;if(!a[1].f.single)continue;const w=fromCard(a[1],type);if(w)return w}
+  return null;
+}
+const NOTWORD=new Set("in on at up down out off over under to of for by with from as like near into onto about than then and or but if so a an the is are was were be am do does did not no yes".split(" "));
+function word(en,type,ctx){
+  en=en.trim().toLowerCase();if(!en||!tok||NOTWORD.has(en)||NOTNOUN.has(en))return null;wix();if(!JPX)return null;
+  const P=PREF[type][en];
+  if(P){const w=byJP(typeof P==="function"?P(ctx):P,type);if(w)return w}
+  return cardWord(en,type)||dictWord(en,type);
+}
+// ----- nouns and noun phrases -----
+const C=(jp,kana)=>[jp,kana===undefined?jp:kana];
+const DET={this:[C("この")],these:[C("この")],that:[C("その")],those:[C("その")],my:[C("私","わたし"),C("の")],our:[C("私たち","わたしたち"),C("の")],his:[C("彼","かれ"),C("の")],her:[C("彼女","かのじょ"),C("の")]};
+const PRON={this:C("これ"),that:C("それ"),it:C("それ"),these:C("これ"),those:C("それ"),"this one":C("これ"),"that one":C("それ"),here:C("ここ"),there:C("そこ"),"over there":C("あそこ"),
+  he:C("彼","かれ"),she:C("彼女","かのじょ"),we:C("私たち","わたしたち"),i:C("私","わたし"),"this place":C("ここ"),"that place":C("そこ")};
+function NP(s){
+  s=s.trim();const l=s.toLowerCase();
+  if(PRON[l])return{chunks:[PRON[l]],used:[],pron:l};
+  let det=null,rest=s,m=/^(this|that|these|those|my|our|his|her|the|an?|some|any|your) (.+)$/i.exec(s);
+  if(m){det=m[1].toLowerCase();rest=m[2]}
+  let far=false;if(/ over there$/i.test(rest)){far=true;rest=rest.replace(/ over there$/i,"")}
+  const ws=rest.split(" ");if(ws.length>4||/\b(and|or|of|who|which|that)\b/i.test(rest))return null;
+  const chunks=[],used=[];
+  if(NOTNOUN.has(rest.toLowerCase())||TIME[rest.toLowerCase()]!==undefined)return null;
+  let n=findNoun(rest);
+  if(!n&&ws.length>=2&&TIME[ws.slice(1).join(" ").toLowerCase()]===undefined){   // describing word + noun: "big bag"
+    const a=word(ws[0],"adj",{thing:true}),n2=a&&findNoun(ws.slice(1).join(" "));
+    if(n2){const at=/adj-i/.test(a.pos)?C(a.jp,a.kana):/adj-na/.test(a.pos)?C(a.jp+"な",a.kana+"な"):C(a.jp+"の",a.kana+"の");chunks.push(at);used.push(a);n=n2}
+  }
+  if(n){chunks.push(C(n.jp,n.kana));used.push(n)}
+  else{   // a real name ("Kyoto Tower", "Nutella") is said as it is
+    if(!/^[A-Z0-9][A-Za-z0-9'&.-]*( [A-Z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(rest)||dictLookup(rest.toLowerCase()).length||rank(rest.toLowerCase()).some(a=>a[0]>=18))return null;
+    chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"a name, said as it is"});
+  }
+  if(det&&DET[det])chunks.unshift(...(far&&det==="that"?[C("あの")]:DET[det]));
+  return{chunks,used,en:rest};
+}
+// ----- describing words -----
+function adjPred(a,neg,past,mode){   // -> chunks for "... is (not) scary", polite
+  const I=/adj-i/.test(a.pos);let jp=a.jp,k=a.kana,sj,sk;
+  if(I){
+    if(!jp.endsWith("い")||!k.endsWith("い"))return null;
+    sj=jp.slice(0,-1);sk=k.slice(0,-1);
+    if(/adj-ix/.test(a.pos)){if(!jp.endsWith("いい")||!k.endsWith("いい"))return null;sj=jp.slice(0,-2)+"よ";sk=k.slice(0,-2)+"よ"}
+  }
+  const des=past?C("でした"):C("です");
+  if(mode==="too"){const b=I?[sj,sk]:[jp,k];return[C(b[0]+"すぎ"+(past?"ました":"ます"),b[1]+"すぎ"+(past?"ました":"ます"))]}
+  if(mode==="looks"){if(neg||past)return null;const x=I?(/adj-ix/.test(a.pos)?"さそう":"そう"):"そう",b=I?[sj,sk]:[jp,k];return[C(b[0]+x,b[1]+x),C("です")]}
+  if(I){const e=neg?(past?"くなかった":"くない"):past?"かった":null;return e?[C(sj+e,sk+e),C("です")]:[C(jp,k),C("です")]}
+  return neg?[C(jp,k),C(past?"じゃなかった":"じゃない"),C("です")]:[C(jp,k),des];
+}
+// ----- action words -----
+const ROW={"う":"わいうえお","く":"かきくけこ","ぐ":"がぎぐげご","す":"さしすせそ","つ":"たちつてと","ぬ":"なにぬねの","ぶ":"ばびぶべぼ","む":"まみむめも","る":"らりるれろ"};
+const TE={"う":"って","つ":"って","る":"って","む":"んで","ぶ":"んで","ぬ":"んで","く":"いて","ぐ":"いで","す":"して"};
+function vstems(w){
+  const p=w.pos,jp=w.jp,k=w.kana,L=jp.slice(-1);
+  const cut=(n,add)=>[jp.slice(0,jp.length-n)+add,k.slice(0,k.length-n)+add];
+  if(/vs-s|v1-s/.test(p))return null;
+  if(/vs-i/.test(p))return jp.endsWith("する")&&k.endsWith("する")?{i:cut(2,"し"),te:cut(2,"して"),a:cut(2,"し"),pot:cut(2,"でき")}:null;
+  if(/(^|,)vk/.test(p)){
+    const kan=jp.endsWith("来る");if(!(kan||jp.endsWith("くる"))||!k.endsWith("くる"))return null;
+    const b=jp.slice(0,-2),kb=k.slice(0,-2);
+    return{i:[b+(kan?"来":"き"),kb+"き"],te:[b+(kan?"来て":"きて"),kb+"きて"],a:[b+(kan?"来":"こ"),kb+"こ"],pot:[b+(kan?"来られ":"こられ"),kb+"こられ"]};
+  }
+  if(/(^|,)v1/.test(p))return L==="る"&&k.endsWith("る")?{i:cut(1,""),te:cut(1,"て"),a:cut(1,""),pot:cut(1,"られ")}:null;
+  const m=/(^|,)v5([bgkmnrstu])(-s|-i)?/.exec(p);
+  if(m){
+    if(!ROW[L]||k.slice(-1)!==L)return null;const r=ROW[L];
+    return{i:cut(1,r[1]),te:cut(1,m[3]==="-s"?"って":TE[L]),a:m[3]==="-i"?null:cut(1,r[0]),pot:m[3]==="-i"?null:cut(1,r[3])};
+  }
+  if(/(^|,)vs/.test(p))return{i:[jp+"し",k+"し"],te:[jp+"して",k+"して"],a:[jp+"し",k+"し"],pot:[jp+"でき",k+"でき"],suru:true};   // 勉強 -> 勉強します
+  return null;
+}
+// polite endings; each entry is the list of spoken words that follow the stem
+function vend(w,f){
+  const s=vstems(w);if(!s)return null;
+  const J=(a,x)=>a?C(a[0]+x,a[1]+x):null,ok=a=>a.every(Boolean)?a:null;
+  const pot=NOPOT.has(w.jp)?s.i:s.pot;
+  switch(f){
+    case"masu":return ok([J(s.i,"ます")]);case"masen":return ok([J(s.i,"ません")]);case"mashita":return ok([J(s.i,"ました")]);
+    case"masendeshita":return ok([J(s.i,"ません"),C("でした")]);
+    case"masuka":return ok([J(s.i,"ます"),C("か")]);case"mashitaka":return ok([J(s.i,"ました"),C("か")]);
+    case"mashou":return ok([J(s.i,"ましょう")]);case"mashouka":return ok([J(s.i,"ましょう"),C("か")]);
+    case"tai":return ok([J(s.i,"たい"),C("です")]);case"takunai":return ok([J(s.i,"たくない"),C("です")]);
+    case"tekudasai":return ok([s.te&&C(s.te[0],s.te[1]),C("ください")]);
+    case"temorau":return ok([s.te&&C(s.te[0],s.te[1]),C("もらえます"),C("か")]);
+    case"temoii":return ok([s.te&&C(s.te[0],s.te[1]),C("も"),C("いい"),C("です"),C("か")]);
+    case"teiru":return ok([s.te&&C(s.te[0],s.te[1]),C("います")]);
+    case"naide":return ok([J(s.a,"ないで"),C("ください")]);
+    case"must":return ok([J(s.a,"ない"),C("と"),C("いけません")]);
+    case"pot":return ok([J(pot,"ます")]);case"potneg":return ok([J(pot,"ません")]);case"potka":return ok([J(pot,"ます"),C("か")]);
+    case"suki":return ok([C(w.jp+(s.suru?"する":""),w.kana+(s.suru?"する":"")),C("の"),C("が"),C("好き","すき"),C("です")]);
+  }
+  return null;
+}
+const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch"};
+function enVerb(w){
+  if(IRR[w]&&w!=="cut"&&w!=="read")return{c:[IRR[w]],past:true};
+  if(/ing$/.test(w)&&w.length>4){const b=w.slice(0,-3);return{c:[b,b+"e",b.replace(/(.)\1$/,"$1")],ing:true}}
+  if(/ed$/.test(w)&&w.length>3){const b=w.slice(0,-2);return{c:[b,w.slice(0,-1),b.replace(/(.)\1$/,"$1"),b.replace(/i$/,"y")],past:true}}
+  return{c:[w]};
+}
+const TIME={today:"今日",tomorrow:"明日",yesterday:"昨日",now:"今",later:"後で",tonight:"今夜","every day":"毎日",again:"もう一度",slowly:"ゆっくり",together:"一緒に",soon:"もうすぐ","this morning":"今朝","next week":"来週","last week":"先週","tomorrow morning":null};
+const PREP={to:"に",at:"で","in":"で","with":"と",from:"から",by:"で"};
+// "eat ramen", "go to Kyoto tomorrow", "buying a ticket"  ->  {v, chunks before the verb, used, past, ing}
+function VP(s){
+  let l=s.trim().replace(/\s+/g," "),pre=[],used=[],note="";
+  for(const t of Object.keys(TIME).sort((a,b)=>b.length-a.length)){
+    const re=new RegExp("(^| )"+t+"$","i");
+    if(re.test(l)){const w=TIME[t]&&byJP(TIME[t],"any");if(!w)return null;pre.push(C(w.jp,w.kana));used.push(Object.assign(w,{en:t}));l=l.replace(re,"").trim();break}
+  }
+  let ws=l.split(" ");if(!ws[0])return null;
+  // the verb: up to four words ("take a photo"), longest first
+  let v=null,info=null,nv=0,key="";
+  const head=enVerb(ws[0].toLowerCase());
+  for(let n=Math.min(4,ws.length);n>=1&&!v;n--){
+    for(const c of head.c){
+      const k=[c,...ws.slice(1,n).map(x=>x.toLowerCase())].join(" ");
+      if(n===1&&VBLOCK.has(c))continue;
+      if(n>1&&!PREF.v[k])continue;
+      const w=word(k,"v");if(w){v=w;info=head;nv=n;key=k;break}
+    }
+  }
+  if(!v||!vstems(v))return null;
+  used.push(v);
+  let rest=ws.slice(nv).join(" ").replace(/^(me|us|you)( |$)/i,"").trim();
+  const mv=/^(行く|来る|帰る|戻る)$/.test(v.jp);
+  // "here" / "there": where it happens
+  const pm=/(?:^| )(over there|here|there)$/i.exec(rest);
+  if(pm){pre.push(PRON[pm[1].toLowerCase()],C(mv||/^(泊まる|住む|座る|入る|置く|止まる)$/.test(v.jp)?"に":"で"));rest=rest.slice(0,pm.index).trim()}
+  if(FIXOBJ[key]){const o=byJP(FIXOBJ[key],"n");if(!o)return null;pre.push(C(o.jp,o.kana),key==="take a bath"?C("に"):C("を","お"));used.push(o)}
+  if(rest){
+    if(FIXOBJ[key])return null;
+    const m=/^(.*?)(?:(?:^| )(to|at|in|with|from|by) (.+))?$/i.exec(rest);if(!m)return null;
+    let obj=m[1].trim(),pp=m[2]?[m[2].toLowerCase(),m[3]]:null;
+    if(pp&&/\b(to|at|in|with|from|by|on|for|about|into)\b/i.test(pp[1]))return null;   // two "to/at/with" parts: too complex
+    if(/\b(on|for|about|into|because|and|but|if|when|so)\b/i.test(obj))return null;
+    if(pp){
+      const np=NP(pp[1]);if(!np||np.pron==="i")return null;
+      let part=PREP[pp[0]];
+      if((pp[0]==="at"||pp[0]==="in")&&/^(泊まる|住む|座る|入る|いる|ある)$/.test(v.jp))part="に";
+      if(pp[0]==="to"&&!mv&&!/^(送る|電話|教える|見せる)$/.test(v.jp))return null;
+      pre.push(...np.chunks,C(part));used.push(...np.used);
+    }
+    if(obj){
+      if(mv){
+        if(/^(home)$/i.test(obj)&&v.jp!=="帰る"){const h=byJP("家","n");if(!h)return null;pre.push(C(h.jp,h.kana),C("に"));used.push(h)}
+        else if(/^(home)$/i.test(obj)){}
+        else return null;
+      }else{
+        const np=NP(obj);if(!np||np.pron==="i"||np.pron==="we"||np.pron==="he"||np.pron==="she")return null;
+        let part;
+        if(NIOBJ.has(v.jp))part=C("に");else if(GAOBJ.has(v.jp))part=C("が");
+        else if(/(^|,)vt/.test(v.pos)||(/(^|,)vs/.test(v.pos)&&!/(^|,)vi/.test(v.pos)))part=C("を","お");
+        else return null;   // this verb takes no direct object: not built
+        pre.push(...np.chunks,part);used.push(...np.used);
+      }
+    }
+  }
+  return{v,pre,used,past:!!info.past,ing:!!info.ing};
+}
+// ----- whole sentences -----
+const cap=s=>s.charAt(0).toUpperCase()+s.slice(1);
+// 'Hello, how do I say "this wall is scary" in Japanese?' -> 'this wall is scary'
+function cleanQ(q){
+  return q.trim().replace(/\s+/g," ").replace(/[?!.]+$/,"")
+    .replace(/^(?:hello|hi|hey|excuse me|sorry|um|well|ok|okay|so|please tell me)[,!. ]+/i,"")
+    .replace(/^(?:how (?:do|can|would|should) (?:i|you|we) (?:say|ask|write)|how to (?:say|ask)|what(?:'s| is) the japanese (?:word )?for|what(?:'s| is)|how do you say|translate|say)\s*(?=["“'‘])/i,"")
+    .replace(/^(?:how (?:do|can|would|should) (?:i|you|we) (?:say|ask)|how to (?:say|ask)|what(?:'s| is) the japanese (?:word )?for|how do you say|translate|say)\s*(?:if|whether|for|that|:)?\s*/i,"")
+    .replace(/\s+in japanese$/i,"").replace(/^["“'‘]+|["”'’]+$/g,"").replace(/\s+in japanese$/i,"").replace(/[?!.]+$/,"").replace(/^["“'‘]+|["”'’]+$/g,"").trim();
+}
+function compose(q){
+  if(!tok)return null;wix();if(!JPX)return null;
+  let s0=cleanQ(q);
+  if(!s0||s0.split(" ").length>10)return null;
+  const isQ=/\?\s*["”']?\s*$/.test(q);
+  let please=false;if(/[, ]+please$/i.test(s0)){please=true;s0=s0.replace(/[, ]+please$/i,"")}
+  const en=cap(s0)+(isQ?"?":"");
+  const l0=s0.replace(/’/g,"'").replace(/\b(it|that|this|he|she|there|what|where|who)'s\b/gi,"$1 is").replace(/\bi'm\b/gi,"i am").replace(/\b(we|they|you)'re\b/gi,"$1 are")
+    .replace(/\b(is|are|was|were|do|does|did|would|could|should|wo|ca)n't\b/gi,(m,a)=>({wo:"will",ca:"can"}[a.toLowerCase()]||a)+" not").replace(/\bcannot\b/gi,"can not").replace(/\bi'll\b/gi,"i will").replace(/\bi'd like\b/gi,"i would like").replace(/\bi've\b/gi,"i have").replace(/\blet's\b/gi,"lets");
+  const KA=C("か"),WA=C("は","わ"),GA=C("が"),O=C("を","お");
+  // a time word at the end ("... today") goes first in Japanese
+  let T=[],Tu=[],l=l0,s=s0;
+  for(const t of Object.keys(TIME).sort((a,b)=>b.length-a.length)){
+    const re=new RegExp(" "+t+"$","i");
+    if(re.test(l)){const w=TIME[t]&&byJP(TIME[t],"any");if(!w)return null;T=[C(w.jp,w.kana)];Tu=[Object.assign(w,{en:t})];l=l.replace(re,"");s=s.replace(re,"");break}
+  }
+  const out=(chunks,used,notes,twa)=>chunks&&chunks.every(Boolean)?{chunks:[...T,...(twa&&T.length?[WA]:[]),...chunks],used:[...Tu,...used].filter(u=>u&&u.jp),notes:notes||[],en}:null;
+  const subj=str=>{   // -> {chunks (with は), used, thing} ; I / you / it are left out, as Japanese does
+    const t=str.trim().toLowerCase();
+    if(/^(i|we|you|it)$/.test(t))return{chunks:[],used:[],thing:t==="it"?false:null,omit:t};
+    const np=NP(str.trim());if(!np)return null;
+    return{chunks:[...np.chunks,T.length?GA:WA],used:np.used,thing:!np.pron||/^(this|that|these|those)/.test(np.pron)};
+  };
+  const pred=(str,S,neg,past,mode)=>{   // what comes after is/are
+    let t=str.trim(),adv=null,m;
+    if((m=/^(very|really|so|extremely|super|too|a little|a bit|a little bit|slightly|kind of|pretty|quite|that) (.+)$/i.exec(t))){adv=m[1].toLowerCase();t=m[2]}
+    if(PBLOCK.has(t.toLowerCase())||/^(in|on|at|under|near|next|behind|with|from|for|to|of|by|inside|outside|above|below|between|across)\b/i.test(t))return null;
+    const a=word(t,"adj",{thing:S.thing});
+    if(a){
+      if(/^好き|^嫌い|^欲しい|^必要/.test(a.jp))return null;
+      let ch=[];
+      if(adv==="too")mode="too";
+      else if(adv&&neg&&/^(very|really|so|that)$/.test(adv))ch.push(C("あまり"));
+      else if(adv&&/^(very|really|so|extremely|super)$/.test(adv))ch.push(C("とても"));
+      else if(adv&&/^(a little|a bit|a little bit|slightly|kind of)$/.test(adv))ch.push(C("ちょっと"));
+      else if(adv&&/^(pretty|quite)$/.test(adv))ch.push(C("けっこう"));
+      else if(adv)return null;
+      const p=adjPred(a,neg,past,mode);if(!p)return null;
+      return{chunks:[...ch,...p],used:[a]};
+    }
+    if(adv||mode)return null;
+    if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);if(vp&&vp.ing){const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e&&!neg&&!past)return{chunks:[...vp.pre,...e],used:vp.used}}return null}
+    const np=NP(t);if(!np||np.pron==="i")return null;
+    return{chunks:[...np.chunks,...(neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")])],used:np.used};
+  };
+  let m;
+  // --- "my head hurts" ---
+  if((m=/^(?:my |the )?(.+?) (?:hurts?|is hurting|aches?|is sore)$/i.exec(l))&&!/^(it|this|that|here)$/i.test(m[1])){
+    const n=findNoun(m[1]),a=byJP("痛い","adj");
+    if(n&&a)return out([C(n.jp,n.kana),GA,C(a.jp,a.kana),C("です")],[n,a]);
+  }
+  if((m=/^(.+?) (?:is|are) (?:broken|not working)$/i.exec(l))||(m=/^(.+?) (?:does|do|will) not work$/i.exec(l))){
+    const np=NP(s.slice(0,m[1].length)),v=byJP("壊れる","v"),e=v&&vend(v,"teiru");
+    return np&&e&&!/^(i|he|she|we)$/.test(np.pron||"")?out([...np.chunks,GA,...e],[...np.used,v]):null;
+  }
+  // --- questions: "is this wall scary?" ---
+  if((m=/^(is|are|was|were) (not )?(.+)$/i.exec(l))&&!/^there /i.test(m[3])&&!/^is it (ok|okay|alright|all right|fine) (to|if i) /i.test(l)){
+    const past=/^w/i.test(m[1]),ws=m[3].split(" ");
+    for(let i=1;i<ws.length;i++){
+      const S=subj(ws.slice(0,i).join(" "));if(!S)continue;
+      const P=pred(ws.slice(i).join(" "),S,!!m[2],past);if(!P)continue;
+      return out([...S.chunks,...P.chunks,KA],[...S.used,...P.used],[],true);
+    }
+    return null;
+  }
+  // --- "this wall is scary", "it was not expensive", "that looks delicious" ---
+  if((m=/^(.+?) (is|are|am|was|were|looks?|seems?)( not)? (.+)$/i.exec(l))&&!/^(what|where|who|when|why|how|which|there|here)\b/i.test(m[1])){
+    const S=subj(m[1]);
+    if(S){
+      const looks=/^(look|seem)/i.test(m[2]),P=pred(m[4],S,!!m[3],/^w/i.test(m[2]),looks?"looks":null);
+      if(P)return out([...S.chunks,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[],true);
+    }
+    if(!/^(i|we|you) (am|are) [a-z]+ing\b/i.test(l))return null;
+  }
+  // --- fixed shapes with a thing ---
+  const thing=(re,build)=>{const mm=re.exec(l);if(!mm)return undefined;const np=NP(s.slice(s.length-mm[1].length));return np&&!/^(i|he|she|we)$/.test(np.pron||"")?build(np):null};
+  const fixed=[
+    [/^how much (?:is|are|for) (.+)$/i,np=>out([...np.chunks,WA,C("いくら"),C("です"),KA],np.used)],
+    [/^(?:i|we) do not like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,WA,C(a.jp,a.kana),C("じゃない"),C("です")],[...np.used,a])}],
+    [/^do you like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,WA,C(a.jp,a.kana),C("です"),KA],[...np.used,a])}],
+    [/^(?:i|we) (?:really like|love) (.+)$/i,np=>{const a=byJP("大好き","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
+    [/^(?:i|we) like (.+)$/i,np=>{const a=byJP("好き","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
+    [/^(?:i|we) need (.+)$/i,np=>{const a=byJP("必要","adj");return a&&out([...np.chunks,GA,C(a.jp,a.kana),C("です")],[...np.used,a])}],
+    [/^(?:i|we) (?:have )?lost (.+)$/i,np=>{const v=byJP("なくす|無くす","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,O,...e],[...np.used,v])}],
+    [/^(?:i|we) (?:have )?(?:forgot|forgotten) (.+)$/i,np=>{const v=byJP("忘れる","v"),e=v&&vend(v,"mashita");return e&&out([...np.chunks,O,...e],[...np.used,v])}],
+    [/^(?:i|we) do not have (?:an? |any )?(.+)$/i,np=>out([...np.chunks,GA,C("ありません")],np.used)],
+    [/^(?:i|we) have (.+)$/i,np=>{const v=byJP("持つ","v"),e=v&&vend(v,"teiru");return e&&out([...np.chunks,O,...e],[...np.used,v],["This is “have” for a thing you carry or own. For a reservation, a fever or a question, say … ga arimasu. For people and pets, … ga imasu."])}],
+    [/^(.+) (?:is|are) (?:broken|not working)$/i,null],
+  ];
+  for(const[re,build]of fixed){if(!build)continue;const r=thing(re,build);if(r)return r}
+  // --- action words ---
+  const acts=[
+    [/^(?:i|we) do not want to (.+)$/i,"takunai"],[/^(?:i|we) (?:want|wanna|would like) to (.+)$/i,"tai"],
+    [/^(?:can|could|may) (?:i|we) (?:please )?(.+)$/i,"temoii"],[/^is it (?:ok|okay|alright|all right|fine) (?:to|if i) (.+)$/i,"temoii"],
+    [/^(?:can|could|would|will) you (?:please )?(.+)$/i,"temorau"],
+    [/^(?:please )?do not (.+)$/i,"naide"],[/^please (.+)$/i,"tekudasai"],
+    [/^(?:lets|let us) (.+)$/i,"mashou"],[/^shall we (.+)$/i,"mashouka"],
+    [/^where can (?:i|we) (.+)$/i,"where"],[/^how (?:do|can|should) (?:i|we) (.+)$/i,"how"],
+    [/^(?:i|we) can not (.+)$/i,"potneg"],[/^(?:i|we) can (.+)$/i,"pot"],[/^can you (.+)$/i,"potka"],
+    [/^(?:i|we) (?:have to|need to|must|gotta|have got to) (.+)$/i,"must"],
+    [/^(?:i|we) (?:like|love|enjoy) (?:to )?(.+)$/i,"suki"],
+    [/^(?:i|we) (?:am|are) going to (.+)$/i,"masu"],[/^(?:i|we) will not (.+)$/i,"masen"],[/^(?:i|we) will (.+)$/i,"masu"],
+    [/^(?:i|we) do not (.+)$/i,"masen"],[/^(?:i|we) did not (.+)$/i,"masendeshita"],
+    [/^(?:i|we) (?:am|are) (.+)$/i,"teiru"],[/^(?:do|will) you (.+)$/i,"masuka"],[/^did you (.+)$/i,"mashitaka"],
+    [/^(?:i|we) (.+)$/i,"plain"]];
+  for(const[re,f0]of acts){
+    if(!(m=re.exec(l)))continue;
+    let f=f0;const vp=VP(s.slice(s.length-m[1].length));if(!vp)return null;
+    if(f==="teiru"&&!vp.ing)return null;
+    if(f==="teiru"&&/^(行く|来る|帰る|戻る)$/.test(vp.v.jp))f="masu";
+    if(f==="plain")f=vp.ing?null:vp.past?"mashita":"masu";
+    if(!f)return null;
+    if(vp.ing&&f!=="teiru"&&f!=="suki")return null;
+    if(vp.past&&f!=="mashita")return null;
+    if(f==="tekudasai"||(please&&f==="masu"))f="tekudasai";
+    let pre=vp.pre,e;
+    if(f==="where"||f==="how"){
+      // "where can I buy a ticket" -> ticket wa doko de kaemasu ka
+      const obj=pre.length&&pre[pre.length-1][0]==="を";
+      const lead=obj?[...pre.slice(0,-1),WA]:pre;
+      e=vend(vp.v,f==="where"?"potka":"masuka");
+      return e&&out([...lead,f==="where"?C("どこ"):C("どうやって"),...(f==="where"?[C("で")]:[]),...e],vp.used);
+    }
+    if(/^pot/.test(f)&&pre.length&&pre[pre.length-1][0]==="を")pre=[...pre.slice(0,-1),GA];   // "can read X": X ga yomemasu
+    e=vend(vp.v,f);
+    return e&&out([...pre,...e],vp.used,f==="temorau"?["A polite way to ask someone to do something for you."]:[]);
+  }
+  // --- "eat this" / "wait here", said as a request ---
+  if(please){const vp=VP(s);if(vp&&!vp.ing&&!vp.past){const e=vend(vp.v,"tekudasai");if(e)return out([...vp.pre,...e],vp.used)}}
+  return null;
+}
+function composeHTML(q){
+  let r=null;try{r=compose(q)}catch(e){r=null}
+  if(!r)return null;
+  const jp=r.chunks.map(c=>c[0]).join(""),rom=r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1]));
+  if(rom.some(x=>x==null))return null;
+  fillHTML.last=jp;
+  const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}`).join("<br>");
+  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),"")}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
+}
+// When no sentence could be built: every important word on its own, to point at or say one by one.
+function wordsHTML(q){
+  if(!tok)return"";wix();if(!JPX)return"";
+  const ws=[...new Set(words(q.replace(/’/g,"'")).filter(w=>!QSTOP.has(w)&&!/^(is|are|was|were|am|not|very|really|and|or|but|with|from|have|has|will|hello|hi|there|here|they|them|he|she|we|on|at|by|if|so|just)$/.test(w)&&w.length>=2&&/^[a-z']+$/.test(w)))].slice(0,6);
+  let rows="",n=0;const seen=new Set();
+  for(const w of ws){
+    const ev=enVerb(w);
+    let x=findNoun(w)||word(w,"adj",{thing:true});
+    if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
+    if(!x||seen.has(x.jp))continue;seen.add(x.jp);
+    const r=x.kana?romaji(x.kana):null;if(!r)continue;
+    rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
+  }
+  return n>=2?`<div class="card dict"><div class="where">Word by word · I couldn't build this as one sentence, so here is each word</div>${rows}<div class="tags"><span>words</span></div></div>`:"";
 }
 
 const SYSTEM=`You are the helper inside "Pocket Japanese", an offline phrasebook for an English-speaking traveller in Japan who cannot read Japanese.
@@ -150,23 +577,6 @@ Strict rules:
 
 ${FILL_RULES}`;
 
-// The on-device model is too small to write Japanese safely (in testing it produced
-// fluent-looking nonsense that passes a word check), so offline it may only point
-// at hand-written cards and add a short English tip.
-const SYSTEM_LOCAL=`You are the helper inside "Pocket Japanese", an offline phrasebook for an English-speaking traveller in Japan.
-Each message gives you numbered PHRASEBOOK ENTRIES and a QUESTION.
-
-Reply with at most 3 lines, using ONLY these two kinds of lines:
-CARD <number>
-NOTE <one short English sentence>
-
-Rules:
-- Choose the entry that says what the USER wants to say. Put the best one first. Use 1 or 2 CARD lines.
-- Check who is speaking: some entries are what you say, others are replies to someone else.
-- Never write Japanese yourself. Never write romaji.
-- If nothing fits, write only: NOTE None of my cards say that exactly.
-- Nothing else. No explanations outside NOTE.`;
-
 // ---------- page furniture ----------
 const css=document.createElement("style");
 css.textContent=`#tabs{display:flex;gap:6px;margin:0 0 8px}
@@ -189,7 +599,7 @@ css.textContent=`#tabs{display:flex;gap:6px;margin:0 0 8px}
 document.head.appendChild(css);
 const header=document.querySelector("header"),h1=header.querySelector("h1");
 const tabs=document.createElement("div");tabs.id="tabs";
-tabs.innerHTML=`<button data-t="search" class="on">Search</button><button data-t="ask">Ask AI</button>`;
+tabs.innerHTML=`<button data-t="search" class="on">Search</button><button data-t="ask">Ask</button>`;
 h1.after(tabs);
 const askEl=document.createElement("main");askEl.id="ask";askEl.className="hidden";
 askEl.innerHTML=`<div id="askpanel"></div><div id="asklog"></div>
@@ -209,11 +619,9 @@ tabs.addEventListener("click",ev=>{const b=ev.target.closest("button");if(b)show
 const oldReset=window.resetSearch;window.resetSearch=()=>{show("search");oldReset&&oldReset()};
 
 // ---------- engines ----------
-// Online: Google Gemini with the user's own API key (best Japanese).
-// Offline: a small model that runs on this device (backup when there is no
-// internet, or when Gemini refuses / runs out of free quota).
-let WL=null,engine=null,busy=false,model=null,tok=null,tokP=null,history=[];
-let localState="unknown",localPct=0,localTxt="",localFresh=false,localErr="",showSettings=false,gList=null;
+// Optional online helper: Google Gemini with the user's own API key.
+let busy=false,tok=null,tokP=null,history=[];
+let showSettings=false,gList=null;
 const absURL=u=>new URL(u,location.href).href;
 const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
   set:(k,v)=>{try{v==null?localStorage.removeItem(k):localStorage.setItem(k,v)}catch(e){}}};
@@ -252,71 +660,6 @@ async function gAsk(msgs){
   return text;
 }
 const gWhy=e=>!e?"":e.name==="AbortError"?"it took too long":e.status===429?"its free limit was reached":e.status===400||e.status===401||e.status===403?"the key was refused":e.status?"it reported a problem":"no internet";
-async function localAsk(msgs){
-  const r=await engine.chat.completions.create(Object.assign({messages:[{role:"system",content:SYSTEM_LOCAL},...msgs.slice(1)],temperature:0.2,top_p:0.8,presence_penalty:1.5,max_tokens:90,extra_body:{enable_thinking:false}},window.__askParams||{}));
-  return(r.choices[0].message.content||"").replace(/<think>[\s\S]*?(<\/think>|$)/g,"").trim();
-}
-// Phones and tablets always get the small model: the large one needs about 4 GB of
-// graphics memory and froze an 8 GB phone. The large one is for computers only.
-const MOBILE=IOS||/android|mobile/i.test(navigator.userAgent);
-async function pickModel(){
-  let saved=LS.get("pj-ai-model");
-  if(saved==="big"&&MOBILE){   // downloaded by an earlier version: remove it
-    try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
-    LS.set("pj-ai-model",null);saved=null;
-  }
-  if(saved&&MODELS[saved])return MODELS[saved];
-  let k="small";
-  try{const est=await navigator.storage.estimate();
-    if(!MOBILE&&(navigator.deviceMemory||4)>=8&&est.quota-est.usage>5e9)k="big"}catch(e){}
-  return MODELS[k];
-}
-const cfg=()=>{const rec=WL.prebuiltAppConfig.model_list.find(m=>m.model_id===model.id);return{model_list:[{...rec,model_lib:absURL(model.lib)}]}};
-// Called when the Ask tab opens. If the offline model is already on the device it
-// warms up in the background, so it is ready the moment the internet drops.
-async function localInit(){
-  if(localState!=="unknown")return;
-  if(!navigator.gpu){localState="none";return drawPanel()}
-  localState="checking";
-  try{
-    // The model has one 254 MB block of numbers. Many phone graphics chips only allow
-    // 128 MB blocks; on those it crashes mid-answer, so it is never offered there.
-    const ad=await navigator.gpu.requestAdapter();
-    if(!ad||ad.limits.maxStorageBufferBindingSize<2.6e8){
-      try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
-      LS.set("pj-ai-model",null);localState="weak";return drawPanel();
-    }
-    WL=await import(absURL("ai/web-llm.js"));
-    model=await pickModel();
-    if(await WL.hasModelInCache(model.id,cfg()))return localLoad(false);
-    localState="absent";
-  }catch(e){localState="error";localErr=String(e&&e.message||e)}
-  drawPanel();
-}
-function updProg(){
-  const pct=Math.round(localPct*100)+"%";
-  panel.querySelectorAll(".aipct").forEach(el=>el.textContent=(localFresh?localTxt:"")+pct);
-  const f=panel.querySelector(".bar i");if(f)f.style.width=pct;
-}
-async function localLoad(fresh){
-  if(localState==="loading")return;
-  localState="loading";localPct=0;localTxt="";localFresh=fresh;drawPanel();
-  try{
-    try{navigator.storage&&navigator.storage.persist&&await navigator.storage.persist()}catch(e){}
-    LS.set("pj-ai-model",Object.keys(MODELS).find(k=>MODELS[k]===model));
-    engine=await WL.CreateMLCEngine(model.id,{appConfig:cfg(),initProgressCallback:p=>{
-      localPct=p.progress||0;const m=/(\d+)MB fetched/.exec(p.text||"");localTxt=m?m[1]+" MB · ":"";updProg()}});
-    localState="ready";
-  }catch(e){engine=null;localState="error";localErr=String(e&&e.message||e)}
-  drawPanel();
-}
-async function localDelete(){
-  if(!confirm("Delete the offline AI model from this device? You can download it again later."))return;
-  try{engine&&await engine.unload()}catch(e){}
-  try{await WL.deleteModelAllInfoInCache(model.id,cfg())}catch(e){}
-  try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
-  engine=null;LS.set("pj-ai-model",null);localState="absent";drawPanel();
-}
 function loadTokenizer(){
   return new Promise((ok,no)=>{
     const s=document.createElement("script");s.src="ai/kuromoji.js";
@@ -328,36 +671,21 @@ const ensureTok=()=>tokP=tokP||loadTokenizer().then(t=>{tok=t}).catch(()=>{tokP=
 const usable=()=>true;   // works with no AI at all (cards + pattern builder); AI adds to it
 function drawPanel(){
   const key=gKey();
-  const on=key?"Online AI ✓":"Online AI: not set up";
-  const off={ready:"Offline AI ✓",loading:`Offline AI ${localFresh?"downloading":"starting"} <span class="aipct"></span>`,absent:"Offline AI: not downloaded",
-    none:"Offline AI: not supported here",weak:"Offline AI: this device can't run it",error:"Offline AI: problem",unknown:"Offline AI: checking",checking:"Offline AI: checking"}[localState];
-  let h=`<div class="aimeta">${on} · ${off} · <a href="#" id="aiset">${showSettings?"hide settings":"AI settings"}</a></div>`;
-  if(!gKey()&&localState!=="ready"&&!showSettings)h+=`<div class="aimeta">No AI is connected, and it still works: I find the closest hand-written cards and build simple sentences from hand-written patterns. Connect an AI in settings for more.</div>`;
+  let h=`<div class="aimeta">I take the words and sentences in this app and put together the closest match to your question. No AI and no internet needed. <a href="#" id="aiset">${showSettings?"hide options":key?"online AI: on":"options"}</a></div>`;
   if(showSettings){
-    h+=`<div class="card"><div class="en">Online AI (best answers)</div>
-<div class="note">Uses Google's Gemini over the internet. It is far better at Japanese than the offline one.<br>
+    h+=`<div class="card"><div class="en">Optional: online AI</div>
+<div class="note">For sentences the app can't build by itself, it can ask Google's Gemini over the internet. Those answers are marked “AI-made”.<br>
 It needs your own API key, free from <b>aistudio.google.com/apikey</b>. The key is saved on this device only. Your questions are sent to Google.</div>`;
     if(key){
       const list=gList||[gModel()];
       h+=`<div class="note">Key saved. Model: <select id="gmodel">${list.map(m=>`<option${m===gModel()?" selected":""}>${esc(m)}</option>`).join("")}</select></div>
 <div style="margin-top:10px"><button class="aibtn plain" id="gdel">Remove key</button></div>`;
     }else h+=`<div style="margin-top:10px;display:flex;gap:8px"><input id="gkey" type="password" placeholder="Paste your Gemini API key" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="aibtn" id="gsave">Save</button></div>`;
-    h+=`<div class="note" id="gmsg"></div></div>
-<div class="card"><div class="en">Offline AI (backup)</div>
-<div class="note">Runs on this device with no internet. Used automatically when you are offline or Gemini is unavailable. It is a small AI, so it only picks from the hand-written cards and never writes Japanese of its own.</div>`;
-    if(localState==="absent")h+=`<div class="note"><b>${model.size}</b> download, so use Wi-Fi. Removing the app deletes it too.</div><div style="margin-top:10px"><button class="aibtn${key?" plain":""}" id="aidl">Download</button></div>`;
-    else if(localState==="loading")h+=`<div class="bar"><i></i></div><div class="note">${localFresh?"Downloading":"Starting"} · <span class="aipct"></span>${localFresh?"<br>Keep the app open. If it stops, come back and it continues.":""}</div>`;
-    else if(localState==="ready")h+=`<div class="note">Ready (${model.size} on this device).</div><div style="margin-top:10px"><button class="aibtn plain" id="aidel">Delete from device</button></div>`;
-    else if(localState==="none")h+=`<div class="note">This browser can't run it (on iPhone it needs iOS 26 or later).</div>`;
-    else if(localState==="weak")h+=`<div class="note">This device's graphics chip can't hold the model, so it isn't offered here. Nothing is stored for it. Everything else in this tab works without it.</div>`;
-    else if(localState==="error")h+=`<div class="note">${esc(localErr).slice(0,240)}<br>This usually means the device ran out of memory or the download was interrupted. What was downloaded is kept.</div><div style="margin-top:10px"><button class="aibtn plain" id="aidl">Try again</button></div>`;
-    h+=`</div>`;
+    h+=`<div class="note" id="gmsg"></div></div>`;
   }
-  panel.innerHTML=h;updProg();
+  panel.innerHTML=h;
   const $=id=>panel.querySelector("#"+id),click=(id,f)=>{const el=$(id);if(el)el.onclick=ev=>{ev.preventDefault();f()}};
   click("aiset",()=>{showSettings=!showSettings;drawPanel()});
-  click("aidl",()=>localLoad(true));
-  click("aidel",localDelete);
   click("gdel",()=>{LS.set("pj-gemini-key",null);LS.set("pj-gemini-model",null);gList=null;drawPanel()});
   click("gsave",async()=>{
     const k=$("gkey").value.trim(),msg=$("gmsg");if(!k)return;
@@ -371,9 +699,16 @@ It needs your own API key, free from <b>aistudio.google.com/apikey</b>. The key 
     if(!gList&&navigator.onLine!==false)gModels().then(l=>{if(l.length){gList=l;if(showSettings)drawPanel()}}).catch(()=>{})}
   bar.classList.toggle("hidden",!usable());
   if(usable()){ensureTok();
-    if(!log.innerHTML)log.innerHTML=`<div class="ainote">Ask me things like:<br>• how do I ask for a bigger size?<br>• what do I say when I bump into someone?<br>• is there a casual way to say thank you?</div>`}
+    if(!log.innerHTML)log.innerHTML=`<div class="ainote">Type what you want to say, for example:<br>• this wall is scary<br>• where can I buy a ticket?<br>• I want to eat ramen<br>• what do I say when I bump into someone?</div>`}
 }
-function openAsk(){drawPanel();localInit();if(usable())aq.focus()}
+function openAsk(){drawPanel();cleanOld();if(usable())aq.focus()}
+// earlier versions could download an on-device AI model: remove anything it left behind
+let cleaned=false;
+async function cleanOld(){
+  if(cleaned)return;cleaned=true;LS.set("pj-ai-model",null);
+  try{for(const k of await caches.keys())if(k.startsWith("webllm"))await caches.delete(k)}catch(e){}
+  try{if(indexedDB.databases)for(const d of await indexedDB.databases())if(/webllm/i.test(d.name||""))indexedDB.deleteDatabase(d.name)}catch(e){}
+}
 
 // ---------- lookup (the "RAG" part) ----------
 // Every hand-written sentence (main phrase, "also", examples, replies) is its own
@@ -547,6 +882,12 @@ function render(text,items,allowSay,already){
   if(!shown)html=`<div class="ainote">I'm not sure how to help with that one. Try the Search tab, or ask in different words.</div>`;
   return html;
 }
+const xnorm=t=>t.toLowerCase().replace(/’/g,"'").replace(/\((?:i|you|we|it)\)/g," ").replace(/\b(it|that|this|he|she|there|what|where)'s\b/g,"$1 is").replace(/\bi'm\b/g,"i am").replace(/n't\b/g," not").replace(/[^a-z0-9 ]+/g," ").replace(/\s+/g," ").trim();
+function exactSent(q){
+  const k=xnorm(cleanQ(q));
+  if(!k)return null;
+  return sentIndex().find(s=>s.b.en.split(" / ").some(p=>xnorm(p)===k))||null;
+}
 async function send(q){
   if(busy||!q.trim())return;
   busy=true;aq.value="";
@@ -561,27 +902,24 @@ async function send(q){
     msgs.push({role:"user",content:`PHRASEBOOK ENTRIES:\n${ctx}\n\nQUESTION: ${q}`});
     await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,8000))]);
     fillHTML.last=null;
-    const built=ruleFill(q)||"",already=built&&fillHTML.last?[fillHTML.last]:[];
-    if(built)out.innerHTML=built+`<div class="ainote dots">Checking for more</div>`;
-    // online first; the on-device model takes over if Gemini can't answer
+    // a hand-written sentence that says exactly this wins over anything built
+    const same=exactSent(q);
+    let built=same?"":(ruleFill(q)||composeHTML(q)||"");
+    const already=built&&fillHTML.last?[fillHTML.last]:[];
+    if(same)built=`<div class="aimeta">A hand-written card says exactly this:</div>`+(same.main?"":`<div class="aimeta">Found on this card: <b lang="ja">${esc(same.b.jp)}</b> = ${esc(same.b.en)}</div>`)+cardHTML(same.x.e,same.x.where);
+    if(built&&gKey())out.innerHTML=built+`<div class="ainote dots">Checking for more</div>`;
     let text=null,by="",gErr=null;
     if(gKey()){
       if(navigator.onLine===false)gErr=new Error("offline");
       else try{text=await gAsk(msgs);by="Gemini ("+gModel()+")"}catch(e){gErr=e}
     }
-    if(text==null&&localState==="ready"){
-      try{text=await localAsk(msgs);by="the offline AI"+(gErr?" · Gemini wasn't used because "+gWhy(gErr):"")}
-      catch(e){   // the model broke: switch it off and answer from the cards instead
-        text=null;localErr=String(e&&e.message||e);localState="error";
-        try{engine&&engine.unload()}catch(x){}engine=null;drawPanel();
-      }
-    }
     if(text==null){
-      // no AI available right now: the closest hand-written cards
-      const cards=items.filter(it=>it.kind!=="dict").slice(0,built?1:2);
-      out.innerHTML=built+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.${localState==="loading"?" The offline AI is still getting ready.":""}</div>`:"")+
-        (cards.length?`<div class="aimeta">Closest hand-written card${cards.length>1?"s":""}:</div>`+cards.map(it=>{const c=itemCard(it);return(it.kind==="sent"?`<div class="aimeta">Found on this card: <b lang="ja">${esc(it.o.b.jp)}</b> = ${esc(it.o.b.en)}</div>`:"")+cardHTML(c.e,c.where)}).join("")
-          :built?"":`<div class="ainote">I found no matching cards. Try other words, or the Search tab.</div>`);
+      const skip=same?same.x.e.jp:null;
+      const cards=items.filter(it=>it.kind!=="dict"&&itemCard(it).e.jp!==skip).slice(0,built?1:2);
+      const wordsH=built?"":wordsHTML(q);
+      out.innerHTML=built+wordsH+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.</div>`:"")+
+        (cards.length?`<div class="aimeta">${built||wordsH?"Related":"Closest"} hand-written card${cards.length>1?"s":""}:</div>`+cards.map(it=>{const c=itemCard(it);return(it.kind==="sent"?`<div class="aimeta">Found on this card: <b lang="ja">${esc(it.o.b.jp)}</b> = ${esc(it.o.b.en)}</div>`:"")+cardHTML(c.e,c.where)}).join("")
+          :built||wordsH?"":`<div class="ainote">I found nothing for that. Try shorter, simpler words, or the Search tab.</div>`);
       window.__lastAI={q,ctx,text:null,by:"no AI"};
       busy=false;return;
     }
@@ -590,11 +928,13 @@ async function send(q){
     {const r=render(text,items,by.startsWith("Gemini"),already);out.innerHTML=built+(built&&/I'm not sure how to help/.test(r)?"":r)}
     out.innerHTML+=`<div class="aimeta">Answered by ${esc(by)}</div>`;
   }catch(e){
-    out.innerHTML=`<div class="ainote">The AI stopped unexpectedly (${esc(String(e&&e.message||e)).slice(0,120)}). Try again.</div>`;
+    out.innerHTML=`<div class="ainote">Something went wrong (${esc(String(e&&e.message||e)).slice(0,120)}). Try again.</div>`;
   }
   busy=false;
 }
 bar.addEventListener("submit",ev=>{ev.preventDefault();send(aq.value)});
 window.__ask={ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
-  setLocal:s=>{localState=s},setEngine:(e,t)=>{engine=e;localState=e?"ready":localState;if(t)tok=t},state:()=>({localState,localPct,key:!!gKey(),model:gModel(),tok:!!tok}),clear:()=>{history=[]}};
+  compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
+  wordsHTML,word:(e,t)=>word(e,t),pref:()=>PREF,byJP,exactSent,
+  state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>ensureTok(),clear:()=>{history=[]}};
 })();
