@@ -284,11 +284,30 @@ function isName(w){
   if(!/^[A-Za-z0-9][A-Za-z0-9'&.-]*( [A-Za-z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(w))return false;
   const l=w.toLowerCase(),X=wix();
   if(NOTNOUN.has(l)||NOTWORD.has(l)||TIME[l]!==undefined||PBLOCK.has(l)||l.split(" ").some(p=>NOTWORD.has(p)||NOTNOUN.has(p)||STOP.has(p)))return false;
-  for(const f of[l,l.replace(/s$/,""),l.replace(/es$/,""),l.replace(/ing$/,""),l.replace(/ed$/,""),l.replace(/ly$/,"")])if(X.get(gkey(f))||window.SYN&&window.SYN[f])return false;
+  for(const f of[l,l.replace(/s$/,""),l.replace(/es$/,""),l.replace(/ing$/,""),l.replace(/ed$/,""),l.replace(/ly$/,""),...(/^[a-z]/.test(w)?[l.replace(/iest$/,"y"),l.replace(/(.)\1est$/,"$1"),l.replace(/est$/,""),l.replace(/est$/,"e")]:[])])if(X.get(gkey(f))||window.SYN&&window.SYN[f])return false;
   if(/ /.test(w)&&!w.split(" ").every(p=>/^[A-Z0-9]/.test(p))&&l.split(" ").some(p=>window.PICK&&window.PICK[p]!=null||PREF.n[p]))return false;
   return!dictLookup(l).length&&!rank(l).some(a=>a[0]>=18);
 }
 const isThing=s=>{const np=NP(s);return!!np&&!np.pron&&np.chunks.every(c=>c[1]!=null)};
+// words that can take な or の, but people say の before a thing: 普通の日, 最高の日 (not 最高な日)
+const NOATTR=new Set("最高 最悪 最新 普通 秘密 空っぽ 空腹 満腹 ふわふわ でこぼこ ぴかぴか 本物 偽物 無料 最初 最後".split(" "));
+const attrOf=a=>/adj-i/.test(a.pos)?[C(a.jp,a.kana)]:[C(a.jp,a.kana),C(/adj-na/.test(a.pos)&&!NOATTR.has(a.jp)?"な":"の")];
+// "-est" words: "the coolest" -> 一番かっこいい. best / worst / latest are their own words (最高の, 最悪の, 最新の)
+const SUPX={best:"最高",worst:"最悪",latest:"最新",newest:"最新"};
+const supAdj=(x,ctx)=>{if(!(window.PICKA&&window.PICKA[x]!=null||PREF.adj[x]))return null;   // only the checked everyday describing words
+  const a=word(x,"adj",ctx);return a&&/adj-(i|na|no)/.test(a.pos)&&!/^(好き|嫌い|欲しい|必要)/.test(a.jp)?a:null};
+function supl(w,ctx){   // "coolest" / "most beautiful" -> the describing word, or null
+  w=w.toLowerCase();let m;
+  if((m=/^most ([a-z-]+)$/.exec(w)))return supAdj(m[1],ctx);
+  if(!/est$/.test(w)||w.length<6)return null;
+  const b=w.slice(0,-3),c=[];
+  if(/i$/.test(b))c.push(b.slice(0,-1)+"y");          // prettiest -> pretty
+  if(/([^aeiou])\1$/.test(b))c.push(b.slice(0,-1));   // biggest -> big
+  c.push(b,b+"e");                                    // coolest -> cool, cutest -> cute
+  for(const x of c){const a=supAdj(x,ctx);if(a)return a}
+  return null;
+}
+const isSup=w=>!!SUPX[w.toLowerCase()]||/^most /i.test(w)||!!supl(w,{thing:true});
 const dropMy=ch=>{const o=[];for(let i=0;i<ch.length;i++){if(ch[i][0]==="私"&&ch[i+1]&&ch[i+1][0]==="の"){i++;continue}o.push(ch[i])}return o};
 function NP(s){
   s=s.trim();const l=s.toLowerCase();
@@ -296,11 +315,24 @@ function NP(s){
   let det=null,rest=s,m=/^(this|that|these|those|my|our|his|her|the|an?|some|any|your) (.+)$/i.exec(s);
   if(m){det=m[1].toLowerCase();rest=m[2]}
   let far=false;if(/ over there$/i.test(rest)){far=true;rest=rest.replace(/ over there$/i,"")}
+  if(det==="the"){const sp=/^(most [a-z-]+|[a-z-]+est|worst) ([a-z][a-z' -]*?)( ever| in the world| of all time| in history)?$/i.exec(rest);
+    if(sp&&isSup(sp[1])){
+      if(/^ones?$/i.test(sp[2]))return null;   // "the cheapest one": said without "one" (これが一番安いです)
+      const nn=findNoun(sp[2]);if(!nn)return null;
+      const ctx={thing:true,an:/(^|,)an(,|$)/.test(nn.pos||""),ph:/(^|,)ph(,|$)/.test(nn.pos||"")},x=SUPX[sp[1].toLowerCase()],ch=[],us=[],notes=[];
+      if(x){const w=byJP(x,"any");if(!w)return null;ch.push(C(w.jp,w.kana),C("の"));us.push(w)}
+      else{const a=supl(sp[1],ctx);if(!a)return null;
+        ch.push(sp[3]?C("世界一","せかいいち"):C("一番","いちばん"),...attrOf(a));us.push(a);
+        notes.push(sp[3]?"世界一 (sekaiichi) = “the …-est in the world”. Japanese uses it for “…-est ever” too.":"一番 (ichiban) = “the most …”.")}
+      if(nn.parts)ch.push(...nn.parts);else ch.push(C(nn.jp,nn.kana));us.push(nn);
+      return{chunks:ch,used:us,en:rest,desc:true,notes};
+    }
+  }
   {const im=/^(.+?) (?:in|at|from) ([A-Z][\w'-]*(?: [A-Z][\w'-]*)?)$/.exec(rest);   // "the deer in Nara" -> 奈良の鹿
    if(im&&(!det||/^(the|an?)$/.test(det))){const a=NP(im[2]),b=NP(im[1]);if(a&&b&&!a.pron&&!b.pron&&isPlaceNP(a))return{chunks:[...a.chunks,C("の"),...b.chunks],used:[...a.used,...b.used],en:rest};return null}}
   const ws=rest.split(" ");if(ws.length>4||/\b(and|or|of|who|which|that)\b/i.test(rest))return null;
   if(/^(whole|entire|own|other|only|total|half)$/i.test(ws[0]))return null;
-  const chunks=[],used=[];
+  const chunks=[],used=[];let desc=false;
   if(NOTNOUN.has(rest.toLowerCase())||TIME[rest.toLowerCase()]!==undefined)return null;
   if(/^[A-Z][a-z'-]+$/.test(rest)){const lw=rest.toLowerCase(),b=lw.replace(/s$/,""),n0=findNoun(rest);
     if(n0&&!(n0.kind==="everyday"||PREF.n[lw]||PREF.n[b]||/(^|,)pl(,|$)/.test(n0.pos||"")||new RegExp("(^|[^a-z])"+b).test((n0.en||"").toLowerCase()))){
@@ -308,7 +340,7 @@ function NP(s){
   let n=findNoun(rest);
   if(!n&&ws.length>=2&&TIME[ws.slice(1).join(" ").toLowerCase()]===undefined){   // describing word + noun: "big bag"
     const a=word(ws[0],"adj",{thing:true}),n2=a&&findNoun(ws.slice(1).join(" "));
-    if(n2){const at=/adj-i/.test(a.pos)?C(a.jp,a.kana):/adj-na/.test(a.pos)?C(a.jp+"な",a.kana+"な"):C(a.jp+"の",a.kana+"の");chunks.push(at);used.push(a);n=n2}
+    if(n2){chunks.push(...attrOf(a));used.push(a);n=n2;desc=true}
   }
   if(n){if(n.parts)chunks.push(...n.parts);else chunks.push(C(n.jp,n.kana));used.push(n)}
   else{   // a real name ("Kyoto Tower", "Nutella") is said as it is
@@ -319,7 +351,7 @@ function NP(s){
   if(det==="my"&&n&&FAMILY.test(n.jp))det=null;   // "my mom" -> just お母さん: Japanese leaves "my" out for family
   if(det==="my"&&n&&/(^|,)ani(,|$)/.test(n.pos||"")){chunks.unshift(C("うちの"));det=null}   // "my dog" -> うちの犬
   if(det&&DET[det])chunks.unshift(...(far&&det==="that"?[C("あの")]:DET[det]));
-  return{chunks,used,en:rest};
+  return{chunks,used,en:rest,desc};
 }
 // ----- describing words -----
 function adjPred(a,neg,past,mode){   // -> chunks for "... is (not) scary", polite
@@ -418,6 +450,10 @@ function enVerb(w){
   if(IRR[w]&&w!=="cut"&&w!=="read")return{c:[IRR[w]],past:true};
   if(/ing$/.test(w)&&w.length>4){const b=w.slice(0,-3);return{c:[b,b+"e",b.replace(/(.)\1$/,"$1")],ing:true}}
   if(/ed$/.test(w)&&w.length>3&&!/^(feed|need|bleed|speed|seed|breed|weed|proceed|succeed|exceed)$/.test(w)){const b=w.slice(0,-2);return{c:[b,w.slice(0,-1),b.replace(/(.)\1$/,"$1"),b.replace(/i$/,"y")],past:true}}
+  if(/s$/.test(w)&&w.length>2&&!/(ss|us|is)$/.test(w)){
+    const S3={has:"have",does:"do",goes:"go"};if(S3[w])return{c:[S3[w]],s3:true};
+    return{c:[...(/ies$/.test(w)?[w.slice(0,-3)+"y"]:[]),...(/(ch|sh|x|z|o)es$/.test(w)?[w.slice(0,-2)]:[]),w.slice(0,-1),w],s3:true};
+  }
   return{c:[w]};
 }
 const TIME={today:"今日",tomorrow:"明日",yesterday:"昨日",now:"今",later:"後で",tonight:"今夜","every day":"毎日",again:"もう一度",slowly:"ゆっくり",together:"一緒に",soon:"もうすぐ","this morning":"今朝","next week":"来週","last week":"先週","tomorrow morning":null};
@@ -489,7 +525,9 @@ function VP(s){
           if(!swapV(ins?byJP("弾く:ひく","v"):gm?byJP("する","v"):null))return null}
         if(key==="lose"&&/^(試合|ゲーム|勝負|喧嘩|レース|戦い|戦争|選挙|裁判|賭け)$/.test(on0.jp)&&!swapV(byJP("負ける","v")))return null;   // lose a match: 試合に負ける
         if(v.jp==="食べる"&&/^(鶏|豚|牛)$/.test(on0.jp))swapN(on0.jp+"肉");
+        if(v.jp==="料理"&&/^(ご飯|米|お米)$/.test(on0.jp)&&!/meal|dinner|lunch|breakfast/i.test(obj)&&!swapV(byJP("炊く","v")))return null;   // "cook rice": ご飯を炊く
         if(v.jp==="料理"&&!swapV(byJP("作る","v")))return null;
+        if(v.jp==="飲む"&&!/(^|,)fd(,|$)/.test(on0.pos||"")&&!/^(薬|お薬)$/.test(on0.jp))return null;   // "drink the menu": not built
         if(v.jp==="歌う"&&on0.jp==="カラオケ"&&!swapV(byJP("する","v")))return null;   // "sing karaoke": カラオケをする   // "cooking curry": カレーを作っています
         if(v.jp==="試す"&&/(^|,)fd(,|$)/.test(on0.pos||"")){   // "try sushi": 食べてみる / 飲んでみる
           const dr=/^(ビール|水|お水|お茶|コーヒー|紅茶|日本酒|ワイン|ジュース|お酒|酒|牛乳|ミルク|コーラ|緑茶|抹茶|味噌汁|ハイボール|カクテル)$/.test(on0.jp),t=byJP(dr?"飲む":"食べる","v"),ts=t&&vstems(t);
@@ -560,7 +598,8 @@ function compose(q){
   let please=false;if(/[, ]+please$/i.test(s0)){please=true;s0=s0.replace(/[, ]+please$/i,"")}
   const en=cap(s0)+(isQ?"?":"");
   // "even", "actually", "just" add a feeling the rules can't express: left out, with a note
-  const FILL=/\b(even|actually|really even|just|basically|literally|honestly|ever)\b\s*/i,fm=FILL.exec(s0);
+  const supEver=/\bthe (?:most [a-z-]+|[a-z-]+est|worst)\b[a-z' -]*? ever\b/i.test(s0);
+  const FILL=supEver?/\b(even|actually|really even|just|basically|literally|honestly)\b\s*/i:/\b(even|actually|really even|just|basically|literally|honestly|ever)\b\s*/i,fm=FILL.exec(s0);
   let fillNote=null;
   if(fm&&!/^just (a|one|this|that)\b/i.test(s0.slice(fm.index))){fillNote=`“${fm[1].toLowerCase()}” adds a feeling this simple sentence can't carry, so it's left out.`;s0=s0.replace(FILL,"").replace(/\s+/g," ").trim()}
   const l0=s0.replace(/’/g,"'").replace(/\b(it|that|this|he|she|there|what|where|who)'s\b/gi,"$1 is").replace(/\bi'm\b/gi,"i am").replace(/\b(we|they|you)'re\b/gi,"$1 are")
@@ -623,6 +662,14 @@ function compose(q){
       }
     }
     if(PBLOCK.has(tl)||/^(in|on|at|under|near|next|behind|with|from|for|to|of|by|inside|outside|above|below|between|across)\b/i.test(t))return null;
+    {const sp=!adv&&!mode&&/^the (most [a-z-]+|[a-z-]+est|worst)(?: ones?)?( ever| in the world| of all time| in history)?$/i.exec(t);
+     if(sp&&isSup(sp[1])){
+       const x=SUPX[sp[1].toLowerCase()];
+       if(x){if(neg)return null;const w=byJP(x,"any");return w?{chunks:[C(w.jp,w.kana),past?C("でした"):C("です")],used:[w],desc:true}:null}
+       const a=supl(sp[1],{thing:S.thing,an:S.an,ph:S.ph}),p=a&&!neg&&adjPred(a,false,past);if(!p)return null;
+       return{chunks:[sp[2]?C("世界一","せかいいち"):C("一番","いちばん"),...p],used:[a],desc:true,sup:true,
+         notes:[sp[2]?"世界一 (sekaiichi) = “the …-est in the world”. Japanese uses it for “…-est ever” too.":"一番 (ichiban) = “the most …”."]};
+     }}
     const ingw=/^([a-z]+ing)\b/i.exec(t),ingAdj=ingw&&(PREF.adj[ingw[1].toLowerCase()]||window.PICKA&&window.PICKA[ingw[1].toLowerCase()]!=null);
     let a=ingw&&!ingAdj?null:word(t,"adj",{thing:S.thing,an:S.an,ph:S.ph});
     if(a&&a.jp==="低い"&&/^(電池|バッテリー|充電)$/.test((S.used[S.used.length-1]||{}).jp)){const b=byJP("少ない","adj");if(b)a=b}   // battery is low: 少ない
@@ -653,7 +700,7 @@ function compose(q){
         const e=vend(vp.v,/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru");if(e)return{chunks:[...vp.pre,...e],used:vp.used,ga:true}}
       return null}
     const np=NP(t);if(!np||np.pron==="i")return null;
-    return{chunks:[...np.chunks,...(neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")])],used:np.used};
+    return{chunks:[...np.chunks,...(neg?[C(past?"じゃなかった":"じゃない"),C("です")]:[past?C("でした"):C("です")])],used:np.used,desc:!!np.desc,notes:np.notes};
   };
   let m;
   // --- "my head hurts" ---
@@ -717,6 +764,7 @@ function compose(q){
       if(P&&!S.an)S.chunks=dropMy(S.chunks);   // "my room is messy" -> 部屋が…: Japanese leaves out "my" for your own things
       const keepI=!!P&&!!P.desc&&(S.omit==="i"||S.omit==="we"),me=S.omit==="we"?["私たち","わたしたち","we"]:["私","わたし","I"];
       const sc=!P?null:keepI?[C(me[0],me[1]),WA]:P.agent?[...S.chunks.slice(0,-1),C("に")]:P.ga&&!isQ&&!S.omit&&!S.pron&&S.chunks.length&&!T.length?[...S.chunks.slice(0,-1),GA]:S.chunks;
+      if(P&&P.sup&&sc.length&&sc[sc.length-1][0]==="は")sc.splice(-1,1,GA);
       if(P)return out([...sc,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],[...(keepI?[`${me[0]}は (${romaji(me[1])} wa) = “${me[2]}”. Japanese often leaves out “${me[2]}”, but not here: without it, it would sound like you are talking about something else.`]:
         S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[]),...(P.notes||[])],!keepI);
     }
@@ -792,6 +840,16 @@ function compose(q){
     const w=m[1].toLowerCase(),np=w==="him"?{chunks:[C("彼","かれ")],used:[]}:w==="her"?{chunks:[C("彼女","かのじょ")],used:[]}:NP(s.slice(s.length-m[1].length)),a=byJP("好き","adj");
     if(np&&a&&!np.pron)return out([...np.chunks,C("の"),C("こと"),GA,C(a.jp,a.kana),C("です")],[...np.used,a],["… のことが好き is how people say they like someone."]);
     return null;
+  }
+  // --- "she likes cats" -> 彼女は猫が好きです (someone else likes something) ---
+  if((m=/^(.+?) (likes|loves|like|love) (.+)$/i.exec(l))&&!/^(i|we|you|it|this|that|do|does|did|would|will)$/i.test(m[1])&&!/^(to|it|me|him|her|them|us|you)\b/i.test(m[3])){
+    const who=m[1].toLowerCase(),s3=/s$/i.test(m[2]),PN={he:C("彼","かれ"),she:C("彼女","かのじょ"),they:C("彼ら","かれら")};
+    const many=who==="they"||/s$/.test(who.split(" ").pop())&&!/(ss|us|is)$/.test(who)||/\b(parents|people|children|kids)$/.test(who);
+    if(s3!==many){
+      const S=PN[who]?{chunks:[PN[who]],used:[]}:NP(s.slice(0,m[1].length)),O2=NP(s.slice(s.length-m[3].length));
+      if(S&&O2&&!(S.pron&&!PN[who])&&!O2.pron&&(S.chunks.every(c=>c[1]!=null)||/^[A-Z][a-z]+$/.test(m[1]))){const a=byJP(/^lov/i.test(m[2])?"大好き":"好き","adj");
+        if(a)return out([...S.chunks,WA,...O2.chunks,GA,C(a.jp,a.kana),C("です")],[...S.used,...O2.used,a],[],true)}
+    }
   }
   // --- fixed shapes with a thing ---
   const thing=(re,build)=>{const mm=re.exec(l);if(!mm)return undefined;let np=NP(s.slice(s.length-mm[1].length));
@@ -900,7 +958,8 @@ function compose(q){
   // --- someone or something else does it: "the dinosaur ate my homework", "my dad is cooking" ---
   {const ws=l.split(" "),w0=ws[0].toLowerCase(),PN={he:C("彼","かれ"),she:C("彼女","かのじょ"),they:C("彼ら","かれら")};
    // starts with an action word ("drink water", "go to sleep"): an order, not "the drink ..."
-   if(ws.length>=2&&(PREF.v[w0]||window.PICKV&&window.PICKV[w0]!=null)&&!isThing(s)){const vp=VP(s);if(vp&&!vp.ing&&!vp.past&&!vp.you){const e=order(vp);if(e)return out([...vp.pre,...e],vp.used)}}
+   const foodCmd=()=>{const n=findNoun(s),f=n&&n.parts&&findNoun(ws.slice(1).join(" "));return!!f&&/(^|,)fd(,|$)/.test(f.pos||"")};
+   if(ws.length>=2&&(PREF.v[w0]||window.PICKV&&window.PICKV[w0]!=null)&&(!isThing(s)||foodCmd())){const vp=VP(s);if(vp&&!vp.ing&&!vp.past&&!vp.you){const e=order(vp);if(e)return out([...vp.pre,...e],vp.used)}}
    for(let i=Math.min(4,ws.length-1);i>=1;i--){   // longest subject first: "the last train" before "the last"
      const head=ws.slice(0,i).join(" ");
      if(/^(i|we|you|it|this|that|there|here|what|who|where|how|why|when|which|do|does|did|can|could|will|would|please|lets|is|are|was|were)$/i.test(w0))break;
@@ -911,6 +970,11 @@ function compose(q){
      // a made-up name subject must be all capitals ("Elon Musk"), so "Bob ate" is not one name
      if(i>1&&np.chunks.some(c=>c[1]==null)&&!head.split(" ").every(x=>/^[A-Z0-9]/.test(x)||/^(the|a|an|my|your|his|her|our|their)$/i.test(x)))continue;
      const vp=VP(rest);if(!vp||vp.ing!==ing)continue;
+     if(!ing&&!vp.past){   // one subject, happening now, needs the -s: "the dog runs" (but "a secret place" is just a thing)
+       const v0=(rest.split(" ")[0]||"").toLowerCase(),hl=head.toLowerCase().split(" ").pop();
+       const many=w0==="they"||/s$/.test(hl)&&!/(ss|us|is)$/.test(hl)||/^(people|children|kids|men|women|police|mice|feet|teeth)$/.test(hl);
+       if(!many&&!/s$/.test(v0)&&!/^(will|would|can|could|should|might|must|may|did|does|do|has|have|had|always|never|usually|often|sometimes|also|really|just|still|already|finally|won'?t|can'?t|didn'?t|doesn'?t|don'?t)$/.test(v0))continue;
+     }
      if(!vp.me&&!vp.pre.some(ch=>ch[0]==="を"))viSwap(vp);   // "the door opened" -> ドアが開きました
      // "the dog bit me": Japanese says "I was bitten by the dog" (犬に噛まれました), not 私を
      if(vp.me&&vp.v.kana!=="ついてくる"){
@@ -922,7 +986,7 @@ function compose(q){
        const e=vend(v,ing?"ukemiteiru":"ukemi");if(!e)continue;
        return out([...np.chunks,C("に"),...vp.pre,...e],[...np.used,...vp.used],["Japanese says this as “I got … by …” rather than using a word for “me”."]);
      }
-     const f=ing?(/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru"):vp.past?"mashita":"masu";
+     const f=ing?(/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru"):vp.past?"mashita":/^(住む|働く|知る|持つ|後悔)$/.test(vp.v.jp)?"teiru":"masu";
      const e=vend(vp.v,f);if(!e)continue;
      return out([...np.chunks,PN[w0]?WA:GA,...vp.pre,...e],[...np.used,...vp.used]);
    }}
@@ -952,7 +1016,7 @@ function wordsHTML(q){
     // two words that are one thing ("vending machine") when a card or the everyday list knows them
     if(ws[i+1]){const two=w+" "+ws[i+1],t=findNoun(two);if(t){x=t;w=two;i++}}
     const ev=enVerb(w);
-    if(!x)x=findNoun(w)||word(w,"adj",{thing:true});
+    if(!x)x=findNoun(w)||word(w,"adj",{thing:true})||supl(w,{thing:true});
     if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
     if(x&&x.kind==="dictionary"){const first=gkey((x.en||"").split(/[\/;]/)[0]);if(first!==gkey(w)&&first!==gkey(w).replace(/s$/,"")&&first!==ev.c[0])x=null}   // "even" -> 水平 (level): wrong sense, skip
     if(!x||seen.has(x.jp))continue;seen.add(x.jp);
