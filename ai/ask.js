@@ -104,13 +104,13 @@ function fillHTML(letter,word){
   if(n){
     // reading comes from the card/dictionary and the hand-written pattern: nothing is guessed
     const wr=n.rom||romaji(n.kana);if(wr==null)return null;
-    fillHTML.last=p[0].replace("〜",n.jp);
+    fillHTML.last=p[0].replace("〜",n.jp);fillHTML.used=[n.jp];
     return`<div class="card dict">${label}${ttsBlock(p[0].replace("〜",n.jp),base.e.romaji.replace("~",wr),patSay(base.e,n.say||sayWord(n.kana)))}<div class="en">${en}</div><div class="note">Word used: <span lang="ja">${esc(n.jp)}</span> (${esc(wr)}) = ${esc(n.en)}</div><div class="tags"><span>pattern + word</span></div></div>`;
   }
   // not in the cards or dictionary: names and brands are said as they are
   // only for real names ("Nutella", "Tokyo Dome"): capitalised, and unknown to both the cards and the dictionary
   if(!isName(word))return null;
-  fillHTML.last=p[0].replace("〜",word);
+  fillHTML.last=p[0].replace("〜",word);fillHTML.used=[word];
   return`<div class="card dict"><div class="where">Built by the app: a hand-written pattern + your word as it is</div>${ttsBlock(p[0].replace("〜",word),base.e.romaji.replace("~",word),patSay(base.e,word))}<div class="en">${en}</div><div class="note">“${esc(word)}” is not in the dictionary. Names, brands and borrowed words are usually said as they are, with a Japanese accent.</div><div class="tags"><span>pattern + word</span></div></div>`;
 }
 
@@ -519,6 +519,9 @@ const VIPAIR={"開ける":"開く:あく","閉める":"閉まる","始める":"�
   "転がす":"転がる","回す":"回る","冷やす":"冷える","温める":"温まる","割る":"割れる","倒す":"倒れる","落とす":"落ちる","止める":"止まる","出す":"出る","入れる":"入る",
   "起こす":"起きる","動かす":"動く","揺らす":"揺れる","汚す":"汚れる","曲げる":"曲がる","燃やす":"燃える","沸かす":"沸く","終える":"終わる","治す":"治る","直す":"直る",
   "破る":"破れる","隠す":"隠れる","集める":"集まる","増やす":"増える","減らす":"減る","広げる":"広がる","変える":"変わる","続ける":"続く","見つける":"見つかる","縮める":"縮む"};
+const FEEL=new Set(("怖い 嬉しい 悲しい 寂しい 楽しい つまらない 退屈 気持ち悪い 恥ずかしい 忙しい 暇 疲れた 眠い 眠たい 空腹 満腹 喉が渇いた 病気 元気 "+
+  "ラッキー 幸運 不運 うらやましい 羨ましい 怒った わくわく 緊張した 心配 びっくりした 混乱した 誇らしい ありがたい 申し訳ない 痛い かゆい 快適 "+
+  "居心地が悪い 居心地がいい 気まずい 懐かしい 不安 満足 暑い 暖かい 寒い 涼しい 蒸し暑い 大丈夫 無理 いっぱい 幸せ 苦しい 悔しい 残念 嫌 だるい 気持ちいい").split(" "));
 function viSwap(vp){const t=VIPAIR[vp.v.jp];if(!t)return;const w=byJP(t,"v");if(w){vp.used[vp.used.indexOf(vp.v)]=w;vp.v=w}}
 // "is ..." states that Japanese says with an action word: [verb, 1 = things only / 2 = things only and already happened]
 const STATE={clogged:["詰まる",1],blocked:["詰まる",1],late:["遅れる"],delayed:["遅れる"],open:["開く:あく",1],closed:["閉まる",1],shut:["閉まる",1],
@@ -585,7 +588,7 @@ function compose(q){
     if(!adv&&!mode){
       if(/^on fire$/.test(tl))return null;
       if(/^(tall|short)$/.test(tl)&&(S.an||S.omit&&S.omit!=="it")){
-        const g=byJP("背","n"),w=byJP(tl==="tall"?"高い":"低い","adj"),p=w&&adjPred(w,neg,past);return g&&p?{chunks:[C(g.jp,g.kana),GA,...p],used:[g,w]}:null}
+        const g=byJP("背","n"),w=byJP(tl==="tall"?"高い":"低い","adj"),p=w&&adjPred(w,neg,past);return g&&p?{chunks:[C(g.jp,g.kana),GA,...p],used:[g,w],desc:true}:null}
       if(/^(sick|ill|unwell|not well)$/.test(tl)&&(S.an||S.omit&&S.omit!=="it")&&!past&&!neg){   // feeling sick: 具合が悪い
         const g=byJP("具合","n"),w=byJP("悪い","adj");return g&&w?{chunks:[C(g.jp,g.kana),GA,C(w.jp,w.kana),C("です")],used:[g,w]}:null}
       // slang praise: "this ramen is fire" -> 最高 (the best)
@@ -625,6 +628,12 @@ function compose(q){
     if(a&&a.jp==="低い"&&/^(電池|バッテリー|充電)$/.test((S.used[S.used.length-1]||{}).jp)){const b=byJP("少ない","adj");if(b)a=b}   // battery is low: 少ない
     if(a){
       if(/^好き|^嫌い|^欲しい|^必要/.test(a.jp))return null;
+      if(S.omit&&S.omit!=="it"){
+        // "I am scary" is not "I am scared": 怖いです would be heard as the feeling. Same for boring, embarrassing, fun, gross.
+        if(FEEL.has(a.jp)&&/^(scary|creepy|frightening|terrifying|boring|embarrassing|fun|gross|disgusting|painful|impossible|awkward)$/.test(tl))return null;
+        // said about a person these mean something else: "I'm high" (not 高い), "I'm new here", "I'm close" (almost there)
+        if(/^(high|low|close|new|early|same|secret|clear|enough|lots|few|possible|empty|hard|flat|square|transparent)$/.test(tl))return null;
+      }
       let ch=[];
       if(adv==="too")mode="too";
       else if(adv&&neg&&/^(very|really|so|that)$/.test(adv))ch.push(C("あまり"));
@@ -633,7 +642,7 @@ function compose(q){
       else if(adv&&/^(pretty|quite)$/.test(adv))ch.push(C("けっこう"));
       else if(adv)return null;
       const p=adjPred(a,neg,past,mode);if(!p)return null;
-      return{chunks:[...ch,...p],used:[a]};
+      return{chunks:[...ch,...p],used:[a],desc:!FEEL.has(a.jp)};
     }
     if(adv||mode)return null;
     if(/^[a-z]+ing\b/i.test(t)){const vp=VP(t);
@@ -706,8 +715,10 @@ function compose(q){
     if(S){
       const looks=/^(look|seem)/i.test(m[2]),P=pred(m[4],S,!!m[3],/^w/i.test(m[2]),looks?"looks":null);
       if(P&&!S.an)S.chunks=dropMy(S.chunks);   // "my room is messy" -> 部屋が…: Japanese leaves out "my" for your own things
-      const sc=!P?null:P.agent?[...S.chunks.slice(0,-1),C("に")]:P.ga&&!isQ&&!S.omit&&!S.pron&&S.chunks.length&&!T.length?[...S.chunks.slice(0,-1),GA]:S.chunks;
-      if(P)return out([...sc,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],[...(S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[]),...(P.notes||[])],true);
+      const keepI=!!P&&!!P.desc&&(S.omit==="i"||S.omit==="we"),me=S.omit==="we"?["私たち","わたしたち","we"]:["私","わたし","I"];
+      const sc=!P?null:keepI?[C(me[0],me[1]),WA]:P.agent?[...S.chunks.slice(0,-1),C("に")]:P.ga&&!isQ&&!S.omit&&!S.pron&&S.chunks.length&&!T.length?[...S.chunks.slice(0,-1),GA]:S.chunks;
+      if(P)return out([...sc,...P.chunks,...(isQ?[KA]:[])],[...S.used,...P.used],[...(keepI?[`${me[0]}は (${romaji(me[1])} wa) = “${me[2]}”. Japanese often leaves out “${me[2]}”, but not here: without it, it would sound like you are talking about something else.`]:
+        S.omit&&S.omit!=="it"?[`Japanese normally leaves out “${S.omit==="we"?"we":S.omit==="you"?"you":"I"}” when it is clear who you mean.`]:[]),...(P.notes||[])],!keepI);
     }
     if(!/^(i|we|you) (am|are) [a-z]+ing\b/i.test(l)&&!/^[a-z]+ing\b/i.test(m[4]))return null;
   }
@@ -927,7 +938,7 @@ function composeHTML(q){
   if(!r)return null;
   const jp=r.chunks.map(c=>c[0]).join(""),rom=r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:romaji(c[1]));
   if(rom.some(x=>x==null))return null;
-  fillHTML.last=jp;
+  fillHTML.last=jp;fillHTML.used=r.used.map(u=>u.jp);
   const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}${tone(u)}`).join("<br>");
   return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),(()=>{const a=r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:sayWord(c[1]));return a.some(x=>x==null)?"":a.join(" ")})())}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
 }
@@ -1022,7 +1033,7 @@ const oldReset=window.resetSearch;window.resetSearch=()=>{show("search");oldRese
 
 // ---------- engines ----------
 // Optional online helper: Google Gemini with the user's own API key.
-let busy=false,tok=null,tokP=null,history=[];
+let busy=false,tok=null,tokP=null;
 let showSettings=false,gList=null;
 const absURL=u=>new URL(u,location.href).href;
 const LS={get:k=>{try{return localStorage.getItem(k)}catch(e){return null}},
@@ -1326,6 +1337,7 @@ function exactSent(q){
 async function send(q){
   if(busy||!q.trim())return;
   busy=true;aq.value="";
+  log.innerHTML="";
   const you=document.createElement("div");you.className="you";you.textContent=q;log.appendChild(you);
   const out=document.createElement("div");out.innerHTML=`<div class="ainote dots">Looking it up</div>`;log.appendChild(out);
   you.scrollIntoView({block:"start",behavior:"smooth"});
@@ -1334,13 +1346,12 @@ async function send(q){
     const items=retrieve(core||q);
     const ctx=items.length?items.map(itemText).join("\n"):"(no matching entries)";
     const msgs=[{role:"system",content:SYSTEM}];
-    history.slice(-2).forEach(h=>msgs.push({role:"user",content:"QUESTION: "+h.q},{role:"assistant",content:h.a}));
     msgs.push({role:"user",content:`PHRASEBOOK ENTRIES:\n${ctx}\n\nQUESTION: ${q}`});
     // the word checker is needed to build sentences: wait for it (it loads once, in a few seconds)
     if(!window.DICT){out.innerHTML=`<div class="ainote dots">Getting ready</div>`;await Promise.race([lexWait(),new Promise(r=>setTimeout(r,25000))])}
     if(gKey()&&!tok)await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,8000))]);
     const noTok=!window.DICT?`<div class="ainote">The sentence builder could not load, so I can only show cards for now. Close and reopen the app to try again.</div>`:"";
-    fillHTML.last=null;
+    fillHTML.last=null;fillHTML.used=null;
     // a hand-written sentence that says exactly this wins over anything built
     const same=exactSent(q);
     let built=same?"":(ruleFill(q)||composeHTML(q)||"");
@@ -1354,7 +1365,9 @@ async function send(q){
     }
     if(text==null){
       const skip=same?same.x.e.jp:null;
-      const cards=items.filter(it=>it.kind!=="dict"&&itemCard(it).e.jp!==skip).slice(0,built?1:2);
+      const uw=built&&fillHTML.used?fillHTML.used.filter(Boolean).map(w=>w.length>=3&&/[いるうくぐすつぬぶむ]$/.test(w)?w.slice(0,-1):w):null;   // 食べる -> 食べ (matches 食べたい)
+      const shares=it=>{const t=itemCard(it).e.jp+(it.kind==="sent"?it.o.b.jp:"");return uw.some(w=>t.includes(w))};
+      const cards=items.filter(it=>it.kind!=="dict"&&itemCard(it).e.jp!==skip&&(!uw||shares(it))).slice(0,built?1:2);
       const wordsH=built?"":wordsHTML(core||q);
       out.innerHTML=noTok+built+wordsH+(gErr?`<div class="ainote">Gemini couldn't answer because ${esc(gWhy(gErr))}${gErr.status&&gErr.status!==429?" ("+esc(gErr.message).slice(0,140)+")":""}.</div>`:"")+
         (cards.length?`<div class="aimeta">${built||wordsH?"Related":"Closest"} hand-written card${cards.length>1?"s":""}:</div>`+cards.map(it=>{const c=itemCard(it);return(it.kind==="sent"?`<div class="aimeta">Found on this card: <b lang="ja">${esc(it.o.b.jp)}</b> = ${esc(it.o.b.en)}</div>`:"")+cardHTML(c.e,c.where)}).join("")
@@ -1363,7 +1376,6 @@ async function send(q){
       busy=false;return;
     }
     window.__lastAI={q,ctx,text,by};
-    history.push({q,a:text});history=history.slice(-2);
     {const r=render(text,items,by.startsWith("Gemini"),already);out.innerHTML=built+(built&&/I'm not sure how to help/.test(r)?"":r)}
     out.innerHTML+=`<div class="aimeta">Answered by ${esc(by)}</div>`;
   }catch(e){
@@ -1390,5 +1402,5 @@ window.__ask={build:buildFor,ruleFill,retrieve,check:s=>check(s),render,romaji,s
   compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[2]!=null?c[2]:c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
   findNoun,enVerb,VP:s=>VP(s),isName,
   wordsHTML,word:(e,t)=>word(e,t),pref:()=>PREF,byJP,exactSent,
-  state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>lexWait(),clear:()=>{history=[]}};
+  state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>lexWait()};
 })();
