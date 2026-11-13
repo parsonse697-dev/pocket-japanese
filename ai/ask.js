@@ -441,6 +441,10 @@ function compose(q){
   const isQ=/\?\s*["”'’」]?\s*$/.test(quoted(q)!=null?(/["“„‟«＂「『'‘]\s*([^"“”„‟«»＂」』]*)/.exec(q)||["",""])[1].replace(/["”’'」』\s]+$/,""):q);
   let please=false;if(/[, ]+please$/i.test(s0)){please=true;s0=s0.replace(/[, ]+please$/i,"")}
   const en=cap(s0)+(isQ?"?":"");
+  // "even", "actually", "just" add a feeling the rules can't express: left out, with a note
+  const FILL=/\b(even|actually|really even|just|basically|literally|honestly|ever)\b\s*/i,fm=FILL.exec(s0);
+  let fillNote=null;
+  if(fm&&!/^just (a|one|this|that)\b/i.test(s0.slice(fm.index))){fillNote=`“${fm[1].toLowerCase()}” adds a feeling this simple sentence can't carry, so it's left out.`;s0=s0.replace(FILL,"").replace(/\s+/g," ").trim()}
   const l0=s0.replace(/’/g,"'").replace(/\b(it|that|this|he|she|there|what|where|who)'s\b/gi,"$1 is").replace(/\bi'm\b/gi,"i am").replace(/\b(we|they|you)'re\b/gi,"$1 are")
     .replace(/\b(is|are|was|were|do|does|did|would|could|should|wo|ca)n't\b/gi,(m,a)=>({wo:"will",ca:"can"}[a.toLowerCase()]||a)+" not").replace(/\bcannot\b/gi,"can not").replace(/\bi'll\b/gi,"i will").replace(/\bi'd like\b/gi,"i would like").replace(/\bi've\b/gi,"i have").replace(/\blet's\b/gi,"lets");
   const KA=C("か"),WA=C("は","わ"),GA=C("が"),O=C("を","お");
@@ -450,7 +454,7 @@ function compose(q){
     const re=new RegExp(" "+t+"$","i");
     if(re.test(l)){const w=TIME[t]&&byJP(TIME[t],"any");if(!w)return null;T=[C(w.jp,w.kana)];Tu=[Object.assign(w,{en:t})];l=l.replace(re,"");s=s.replace(re,"");break}
   }
-  const out=(chunks,used,notes,twa)=>chunks&&chunks.every(Boolean)?{chunks:[...T,...(twa&&T.length?[WA]:[]),...chunks],used:[...Tu,...used].filter(u=>u&&u.jp),notes:notes||[],en}:null;
+  const out=(chunks,used,notes,twa)=>chunks&&chunks.every(Boolean)?{chunks:[...T,...(twa&&T.length?[WA]:[]),...chunks],used:[...Tu,...used].filter(u=>u&&u.jp),notes:[...(notes||[]),...(fillNote?[fillNote]:[])],en}:null;
   const subj=str=>{   // -> {chunks (with は), used, thing} ; I / you / it are left out, as Japanese does
     const t=str.trim().toLowerCase();
     if(/^(i|we|you|it)$/.test(t))return{chunks:[],used:[],thing:t==="it"?false:null,omit:t};
@@ -525,6 +529,28 @@ function compose(q){
   ];
   for(const[re,build]of fixed){if(!build)continue;const r=thing(re,build);if(r)return r}
   // --- action words ---
+  // --- "what" + action: 何を goes where the thing would be ---
+  if((m=/^what (are|is|am|were|was|do|does|did|will) (i|we|you|they|he|she) (.+)$/i.exec(l))){
+    const aux=m[1].toLowerCase(),who=m[2].toLowerCase();let rest=s.slice(s.length-m[3].length),want=false;
+    if(/^(?:want|wanna|would like) to /i.test(rest)){want=true;rest=rest.replace(/^(?:want|wanna|would like) to /i,"")}
+    const isDo=/^do(ing)?\b/i.test(rest),ing=/^[a-z]+ing\b/i.test(rest);
+    if(/^(are|is|am|were|was)$/.test(aux)!==ing||want&&ing)return null;
+    let vp;
+    if(isDo){   // "doing here": する, with an optional place / time after it
+      const v=byJP("する","v");if(!v)return null;
+      const tail=rest.replace(/^do(ing)?\s*/i,"").toLowerCase(),pre=[];
+      if(tail&&!/^(here|there|over there)$/.test(tail))return null;
+      if(tail)pre.push(PRON[tail],C("で"));
+      vp={v,pre,used:[v],past:false,ing};
+    }else{vp=VP(rest);if(!vp||vp.pre.some(ch=>ch[0]==="を"))return null}   // it already has a thing: not a what-question
+    const f=want?"tai":ing?"teiru":aux==="did"?"mashita":"masu";
+    if(/^(were|was)$/.test(aux))return null;
+    const e=vend(vp.v,f);if(!e)return null;
+    const S=who==="he"?[C("彼","かれ"),WA]:who==="she"?[C("彼女","かのじょ"),WA]:who==="they"?[C("彼ら","かれら"),WA]:[];
+    if(isDo&&aux==="do"&&!vp.pre.length)return null;   // "what do you do?" usually means "what is your job": left to the cards
+    const note=[];
+    return out([...S,...vp.pre,C("何","なに"),O,...e,KA],vp.used,note);
+  }
   const acts=[
     [/^(?:i|we) do not want to (.+)$/i,"takunai"],[/^(?:i|we) (?:want|wanna|would like) to (.+)$/i,"tai"],
     [/^(?:can|could|may) (?:i|we) (?:please )?(.+)$/i,"temoii"],[/^is it (?:ok|okay|alright|all right|fine) (?:to|if i) (.+)$/i,"temoii"],
@@ -586,6 +612,7 @@ function wordsHTML(q){
     const ev=enVerb(w);
     if(!x)x=findNoun(w)||word(w,"adj",{thing:true});
     if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
+    if(x&&x.kind==="dictionary"){const first=gkey((x.en||"").split(/[\/;]/)[0]);if(first!==gkey(w)&&first!==gkey(w).replace(/s$/,"")&&first!==ev.c[0])x=null}   // "even" -> 水平 (level): wrong sense, skip
     if(!x||seen.has(x.jp))continue;seen.add(x.jp);
     const r=x.kana?romaji(x.kana):null;if(!r)continue;
     rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,sayWord(x.kana)||"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
