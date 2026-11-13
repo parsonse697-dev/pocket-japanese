@@ -39,12 +39,24 @@ const FILL_RULES=`SENTENCE PATTERNS (hand-written, always correct):
 ${PLIST}
 
 FILL <letter> <English word> -> use when the user wants exactly one of these patterns with a specific thing or place in the gap. Write the word in ENGLISH; the app finds the Japanese. Examples: "do you have a blanket" -> FILL A blanket. "does this bus go to Kyoto station" -> FILL P Kyoto station. Only for things and places, never for actions.`;
-const isNounJP=jp=>!!tok&&!/[〜~\/\s]/.test(jp)&&tok.tokenize(jp).every(t=>t.pos==="名詞"||t.pos==="接頭詞");
+// word types come from tables made when the app is built (CARDPOS for cards, DICT[6] for the dictionary)
+const dflag=(jp,f)=>{wix();const d=JPX&&JPX.get(jp);return!!d&&(d[6]||"").split(",").includes(f)};
+const isNounJP=jp=>!/[〜~\/\s]/.test(jp)&&(CARDPOS[jp]?!!CARDPOS[jp][0]:dflag(jp,"N"));
+const isPlace=jp=>CARDPOS[jp]?!!CARDPOS[jp][3]:dflag(jp,"pl");
+const NOUNC=new Map();
+const MATERIAL={iron:"iron",gold:"gold",golden:"gold",silver:"silver",copper:"copper",wood:"wood",wooden:"wood",stone:"stone",glass:"glass",paper:"paper",plastic:"plastic",leather:"leather",cotton:"cotton",wool:"wool",steel:"steel",diamond:"diamond",metal:"metal",rubber:"rubber",sand:"sand",dirt:"dirt",mud:"mud",snow:"snow",ice:"ice",bamboo:"bamboo",silk:"silk",brick:"brick",coal:"coal"};
 // order: the everyday word list, then hand-written cards, then the dictionary; plural forms too
 function findNoun(w){
+  if(NOUNC.has(w))return NOUNC.get(w);
+  const n=findNoun0(w);if(window.DICT){if(NOUNC.size>400)NOUNC.clear();NOUNC.set(w,n)}return n;
+}
+function findNoun0(w){
   const base=w.toLowerCase().normalize("NFKC").replace(/[.?!"“”]/g,"").trim().replace(/^(a|an|the|some|any|my|your|this|that) /,"");
   if(!base||base.startsWith("to ")||NOTNOUN.has(base))return null;   // "to go", "to eat": actions don't fit these patterns
   const forms=[...new Set([base,base.replace(/ies$/,"y"),base.replace(/(es|s)$/,""),base.replace(/s$/,"")])].filter(Boolean);
+  // the checked everyday-word list (data/everyday_words.txt) comes first
+  const PK=window.PICK||{},D=window.DICT||[];
+  for(const f of forms){const i=PK[f];if(i!=null&&D[i]){const d=D[i];return{jp:d[0],kana:d[1],pos:d[6]||"",en:d[4].split(";")[0].trim(),kind:"everyday"}}}
   for(const f of forms){const P=PREF.n[f];if(P){const n=byJP(P,"n");if(n)return n}}
   for(const f of forms){const n=findNoun1(f,"card");if(n)return n}
   for(const f of forms){const n=findNoun1(f,"dict");if(n)return n}
@@ -55,13 +67,17 @@ function findNoun1(w,only){
   if(r)return{jp:r[1].e.jp,kana:r[1].e.kana,en:r[1].e.en,kind:"card"};
   if(only==="card")return null;
   const d=dictWord(w,"n");
-  if(d&&isNounJP(d.jp))return d;
-  // two words like "kyoto station": try the pieces as one Japanese compound (京都 + 駅)
+  if(d&&!/[〜~\/\s]/.test(d.jp)&&(d.pos||"").split(",").includes("N"))return d;
   const ps=w.split(" ");
+  // "iron nugget", "wooden sword": a material + a thing is joined with の (tetsu no nagetto)
+  if(ps.length===2&&MATERIAL[ps[0]]){const a=findNoun(MATERIAL[ps[0]]),b=findNoun(ps[1]);
+    if(a&&b){const ra=romaji(a.kana),rb=romaji(b.kana),sa=sayWord(a.kana),sb=sayWord(b.kana);
+      if(ra&&rb)return{jp:a.jp+"の"+b.jp,kana:a.kana+"の"+b.kana,rom:ra+" no "+rb,say:sa&&sb?sa+" noh "+sb:"",en:w+" ("+ps[1]+" of "+MATERIAL[ps[0]]+")",kind:"dictionary"}}}
+  // two words like "kyoto station": try the pieces as one Japanese compound (京都 + 駅)
   // only when the result is a known word, or a place name + 駅 (station)
   if(ps.length===2){const a=findNoun(ps[0]),b=findNoun(ps[1]);
     if(a&&b){const j=a.jp+b.jp;vocab();
-      if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&tok.tokenize(a.jp).every(t=>t.pos_detail_2==="地域"||t.pos_detail_1==="固有名詞")))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
+      if(VOCAB.has(j)||CORPUS.includes(j)||(b.jp==="駅"&&isPlace(a.jp)))return{jp:j,kana:a.kana+b.kana,en:w,kind:"dictionary"}}}
   return null;
 }
 // the card's guide leaves the gap out ("wah ah-ree-mahss kah"): put the word's guide back where the ~ is in the romaji
@@ -73,8 +89,8 @@ function patSay(e,ws){
 }
 function fillHTML(letter,word){
   const p=PATTERNS[letter.toUpperCase().charCodeAt(0)-65];if(!p)return null;
-  word=word.replace(/\s*[=＝(（].*$/,"").trim();if(!tok||!word||/[ぁ-ヿ一-鿿]/.test(word))return null;   // no word checker, no sentence
-  const n=findNoun(word)||npNoun(word),label=`<div class="where">Built by the app: a hand-written pattern + a ${n?n.kind:""} word · the whole sentence was not checked by a person</div>`;
+  word=word.replace(/\s*[=＝(（].*$/,"").trim();if(!window.DICT||!word||/[ぁ-ヿ一-鿿]/.test(word))return null;   // dictionary not loaded yet: no sentence
+  const n=findNoun(word)||npNoun(word),label=`<div class="where">Built by the app: a hand-written pattern + ${n&&n.kind==="everyday"?"an everyday":"a "+(n?n.kind:"")} word · the whole sentence was not checked by a person</div>`;
   const en=esc(p[1].split("___").join(word));
   const base=ENTRIES.find(x=>x.e.jp===p[0]);if(!base)return null;
   if(n){
@@ -160,14 +176,13 @@ function byJP(alts,type){
 function fromCard(x,type){
   const jp=x.e.jp,kana=x.e.kana;wix();if(!JPX)return null;
   let d=JPX.get(jp);
-  if(!d&&tok&&type==="v"){const ts=tok.tokenize(jp);   // cards give verbs in the polite form: 行きます -> 行く
-    if(ts.length&&ts[0].pos==="動詞"&&ts.slice(1).every(t=>t.pos==="助動詞"))d=JPX.get(ts[0].basic_form)}
+  const cp=CARDPOS[jp];
+  if(!d&&type==="v"&&cp&&cp[1]==="v")d=JPX.get(cp[2]);   // cards give verbs in the polite form: 行きます -> 行く
   if(d)return okType(d,type)?{jp:d[0],kana:d[1],pos:d[6]||"",en:x.e.en,kind:"card"}:null;
-  if(!tok||!kana)return null;
-  const ts=tok.tokenize(jp);
-  if(type==="adj"&&ts.length===1){
-    if(ts[0].pos==="形容詞"&&ts[0].basic_form===jp&&jp.endsWith("い"))return{jp,kana,pos:"adj-i",en:x.e.en,kind:"card"};
-    if(ts[0].pos_detail_1==="形容動詞語幹")return{jp,kana,pos:"adj-na",en:x.e.en,kind:"card"};
+  if(!kana||!cp)return null;
+  if(type==="adj"){
+    if(cp[1]==="i"&&jp.endsWith("い"))return{jp,kana,pos:"adj-i",en:x.e.en,kind:"card"};
+    if(cp[1]==="na")return{jp,kana,pos:"adj-na",en:x.e.en,kind:"card"};
   }
   return null;
 }
@@ -237,7 +252,7 @@ function cardWord(en,type){
 }
 const NOTWORD=new Set("in on at up down out off over under to of for by with from as like near into onto about than then and or but if so a an the is are was were be am do does did not no yes".split(" "));
 function word(en,type,ctx){
-  en=en.trim().toLowerCase();if(!en||!tok||NOTWORD.has(en)||NOTNOUN.has(en))return null;wix();if(!JPX)return null;
+  en=en.trim().toLowerCase();if(!en||NOTWORD.has(en)||NOTNOUN.has(en))return null;wix();if(!JPX)return null;
   const P=PREF[type][en];
   if(P){const w=byJP(typeof P==="function"?P(ctx):P,type);if(w)return w}
   return cardWord(en,type)||dictWord(en,type);
@@ -420,7 +435,7 @@ function cleanQ(q){
     .replace(/\s+in japanese$/i,"").replace(/^["“'‘]+|["”'’]+$/g,"").replace(/\s+in japanese$/i,"").replace(/[?!.]+$/,"").replace(/^["“'‘]+|["”'’]+$/g,"").trim();
 }
 function compose(q){
-  if(!tok)return null;wix();if(!JPX)return null;
+  wix();if(!JPX)return null;
   let s0=cleanQ(q);
   if(!s0||s0.split(" ").length>10)return null;
   const isQ=/\?\s*["”'’」]?\s*$/.test(quoted(q)!=null?(/["“„‟«＂「『'‘]\s*([^"“”„‟«»＂」』]*)/.exec(q)||["",""])[1].replace(/["”’'」』\s]+$/,""):q);
@@ -561,13 +576,13 @@ function composeHTML(q){
 }
 // When no sentence could be built: every important word on its own, to point at or say one by one.
 function wordsHTML(q){
-  if(!tok)return"";wix();if(!JPX)return"";
+  wix();if(!JPX)return"";
   const ws=[...new Set(words(q.replace(/’/g,"'")).filter(w=>!QSTOP.has(w)&&!/^(is|are|was|were|am|not|very|really|and|or|but|with|from|have|has|will|hello|hi|there|here|they|them|he|she|we|on|at|by|if|so|just)$/.test(w)&&w.length>=2&&/^[a-z']+$/.test(w)))].slice(0,6);
   let rows="",n=0;const seen=new Set();
   for(let i=0;i<ws.length;i++){
     let w=ws[i],x=null;
     // two words that are one thing ("vending machine") when a card or the everyday list knows them
-    if(ws[i+1]){const two=w+" "+ws[i+1],t=PREF.n[two]?byJP(PREF.n[two],"n"):findNoun1(two,"card")||findNoun1(two.replace(/s$/,""),"card");if(t){x=t;w=two;i++}}
+    if(ws[i+1]){const two=w+" "+ws[i+1],t=findNoun(two);if(t){x=t;w=two;i++}}
     const ev=enVerb(w);
     if(!x)x=findNoun(w)||word(w,"adj",{thing:true});
     if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
@@ -727,7 +742,7 @@ It needs your own API key, free from <b>aistudio.google.com/apikey</b>. The key 
   if(sel){sel.onchange=()=>LS.set("pj-gemini-model",sel.value);
     if(!gList&&navigator.onLine!==false)gModels().then(l=>{if(l.length){gList=l;if(showSettings)drawPanel()}}).catch(()=>{})}
   bar.classList.toggle("hidden",!usable());
-  if(usable()){ensureTok();
+  if(usable()){if(gKey())ensureTok();   // the analyzer is only needed to check an online AI's sentences
     if(!log.innerHTML)log.innerHTML=`<div class="ainote">Type what you want to say, for example:<br>• this wall is scary<br>• where can I buy a ticket?<br>• I want to eat ramen<br>• what do I say when I bump into someone?</div>`}
 }
 function openAsk(){drawPanel();cleanOld();if(usable())aq.focus()}
@@ -964,8 +979,9 @@ async function send(q){
     history.slice(-2).forEach(h=>msgs.push({role:"user",content:"QUESTION: "+h.q},{role:"assistant",content:h.a}));
     msgs.push({role:"user",content:`PHRASEBOOK ENTRIES:\n${ctx}\n\nQUESTION: ${q}`});
     // the word checker is needed to build sentences: wait for it (it loads once, in a few seconds)
-    if(!tok){out.innerHTML=`<div class="ainote dots">Getting ready</div>`;await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,25000))])}
-    const noTok=!tok?`<div class="ainote">The sentence builder could not load, so I can only show cards for now. Close and reopen the app to try again.</div>`:"";
+    if(!window.DICT){out.innerHTML=`<div class="ainote dots">Getting ready</div>`;await Promise.race([lexWait(),new Promise(r=>setTimeout(r,25000))])}
+    if(gKey()&&!tok)await Promise.race([ensureTok(),new Promise(r=>setTimeout(r,8000))]);
+    const noTok=!window.DICT?`<div class="ainote">The sentence builder could not load, so I can only show cards for now. Close and reopen the app to try again.</div>`:"";
     fillHTML.last=null;
     // a hand-written sentence that says exactly this wins over anything built
     const same=exactSent(q);
@@ -1000,8 +1016,8 @@ async function send(q){
 bar.addEventListener("submit",ev=>{ev.preventDefault();send(aq.value)});
 // Used by the Search tab: the built sentence (or the exact hand-written card) for a whole sentence.
 function buildFor(q){
-  if(!tok){   // the word checker is still loading: redo the search when it is ready
-    ensureTok().then(()=>{const el=document.getElementById("q");if(tok&&el&&el.value.trim()===q&&window.search)window.search()});
+  if(!window.DICT){   // the dictionary is still loading: redo the search when it is ready
+    lexWait().then(()=>{const el=document.getElementById("q");if(el&&el.value.trim()===q&&window.search)window.search()});
     return"";
   }
   try{
@@ -1010,9 +1026,10 @@ function buildFor(q){
     return ruleFill(q)||composeHTML(q)||"";
   }catch(e){return""}
 }
-(window.requestIdleCallback||setTimeout)(()=>ensureTok(),{timeout:5000});   // load the word checker in the background at startup
+let lexP=null;
+const lexWait=()=>lexP=lexP||new Promise(ok=>{const t=setInterval(()=>{if(window.DICT){clearInterval(t);ok()}},60)});
 window.__ask={build:buildFor,ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
   compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
   wordsHTML,word:(e,t)=>word(e,t),pref:()=>PREF,byJP,exactSent,
-  state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>ensureTok(),clear:()=>{history=[]}};
+  state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>lexWait(),clear:()=>{history=[]}};
 })();
