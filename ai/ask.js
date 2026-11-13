@@ -107,7 +107,9 @@ const RULES=[
   ["N",/\b(?:take|drive) (?:me|us) to (.+)/i],
   ["L",/\b(?:i|we) (?:want|wanna|need|would like|'d like) to go to (.+)/i],
   ["C",/\blooking for (?:an? |the |some |my )?(.+)/i],
-  ["B",/\bwhere(?:'s| is| are| can i find| do i find) (?:the |an? |my )?(.+)/i],
+  ["B",/\b(?:do you know|can you tell me|could you tell me|tell me|i don'?t know) where (?:the |an? |my )?(.+?) (?:is|are)$/i],
+  ["B",/\bwhich way (?:is|to) (?:the |an? )?(.+)/i],
+  ["B",/\bwhere(?:'s| is| are| can i find| do i find| would i find) (?:the |an? |my )?(.+)/i],
   ["A",/\b(?:do|does|did) (?:you|they|this (?:store|shop|place)|the (?:store|shop|hotel)) (?:have|sell|carry) (?:an? |any |some |the )?(.+)/i],
   ["A",/\bis there (?:an? |any )?(.+)/i],
   ["D",/\b(?:can|could|may) (?:i|we) (?:have|get) (?:an? |some |the |another )?(.+)/i],
@@ -117,7 +119,8 @@ function ruleFill(q){
   const s=cleanQ(q);
   for(const[L,re]of RULES){
     const m=re.exec(s);if(!m)continue;
-    const w=m[1].replace(/[,.]? please$/i,"").replace(/\s+(?:here|around here|near here|nearby|for me|today|now|right now)$/i,"").replace(/["”']$/,"").trim();
+    const w=m[1].replace(/[,.]? please$/i,"").replace(/\s+(?:here|around here|near here|nearby|for me|today|now|right now)$/i,"").replace(/["”']$/,"")
+      .replace(/\s+(?:at|to|located|from|in|on)$/i,"").trim();   // "where is the vending machine at"
     if(!w||/^to /i.test(w)||w.split(" ").length>3)return null;
     return fillHTML(L,w);
   }
@@ -513,7 +516,7 @@ function compose(q){
     [/^(?:can|could|would|will) you (?:please )?(.+)$/i,"temorau"],
     [/^(?:please )?do not (.+)$/i,"naide"],[/^please (.+)$/i,"tekudasai"],
     [/^(?:lets|let us) (.+)$/i,"mashou"],[/^shall we (.+)$/i,"mashouka"],
-    [/^where can (?:i|we) (.+)$/i,"where"],[/^how (?:do|can|should) (?:i|we) (.+)$/i,"how"],
+    [/^where (?:can|do|could|should|would) (?:i|we) (.+)$/i,"where"],[/^how (?:do|can|should) (?:i|we) (.+)$/i,"how"],
     [/^(?:i|we) can not (.+)$/i,"potneg"],[/^(?:i|we) can (.+)$/i,"pot"],[/^can you (.+)$/i,"potka"],
     [/^(?:i|we) (?:have to|need to|must|gotta|have got to) (.+)$/i,"must"],
     [/^(?:i|we) (?:like|love|enjoy) (?:to )?(.+)$/i,"suki"],
@@ -561,15 +564,18 @@ function wordsHTML(q){
   if(!tok)return"";wix();if(!JPX)return"";
   const ws=[...new Set(words(q.replace(/’/g,"'")).filter(w=>!QSTOP.has(w)&&!/^(is|are|was|were|am|not|very|really|and|or|but|with|from|have|has|will|hello|hi|there|here|they|them|he|she|we|on|at|by|if|so|just)$/.test(w)&&w.length>=2&&/^[a-z']+$/.test(w)))].slice(0,6);
   let rows="",n=0;const seen=new Set();
-  for(const w of ws){
+  for(let i=0;i<ws.length;i++){
+    let w=ws[i],x=null;
+    // two words that are one thing ("vending machine") when a card or the everyday list knows them
+    if(ws[i+1]){const two=w+" "+ws[i+1],t=PREF.n[two]?byJP(PREF.n[two],"n"):findNoun1(two,"card")||findNoun1(two.replace(/s$/,""),"card");if(t){x=t;w=two;i++}}
     const ev=enVerb(w);
-    let x=findNoun(w)||word(w,"adj",{thing:true});
+    if(!x)x=findNoun(w)||word(w,"adj",{thing:true});
     if(!x)for(const c of ev.c){if(VBLOCK.has(c))continue;x=word(c,"v");if(x)break}
     if(!x||seen.has(x.jp))continue;seen.add(x.jp);
     const r=x.kana?romaji(x.kana):null;if(!r)continue;
     rows+=`<div class="sub"><div class="label">${esc(w)}</div>${ttsBlock(x.jp,r,sayWord(x.kana)||"")}<div>${esc(short(x.en,70))}</div></div>`;n++;
   }
-  return n>=2?`<div class="card dict"><div class="where">Word by word · I couldn't build this as one sentence, so here is each word</div>${rows}<div class="tags"><span>words</span></div></div>`:"";
+  return n>=1?`<div class="card dict"><div class="where">Word by word · I couldn't build this as one sentence, so here is each word</div>${rows}<div class="tags"><span>words</span></div></div>`:"";
 }
 
 const SYSTEM=`You are the helper inside "Pocket Japanese", an offline phrasebook for an English-speaking traveller in Japan who cannot read Japanese.
