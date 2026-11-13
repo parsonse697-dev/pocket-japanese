@@ -247,7 +247,9 @@ function search(){
   hits.forEach((d,i)=>{extra+=dictCard(d,i===0&&d[5]?typed:null)});
   if(!hits.length&&(!ranked.length||ranked[0][0]<3)&&words(raw).length<=3&&/^[ -~]+$/.test(typed))extra+=unknownCard(typed);
   const cards=a=>a.map(([,x])=>cardHTML(x.e,x.where)).join("");
-  const out=cards(strong)+extra+cards(rest);
+  // a whole sentence typed here ("this wall is scary") gets the same built answer as the Ask tab
+  const built=window.__ask&&__ask.build&&(words(raw).length>=3||/["“‘「]/.test(typed))?__ask.build(typed):"";
+  const out=built+cards(strong)+extra+cards(rest);
   res.innerHTML=out||`<div class="empty">Nothing found. Try other words, e.g. "bathroom", "check", "spicy".</div>`;
   cnt.textContent=ranked.length?`${ranked.length} best matches`:"";
   window.scrollTo(0,0);

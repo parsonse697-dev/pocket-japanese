@@ -85,9 +85,9 @@ function fillHTML(letter,word){
   }
   // not in the cards or dictionary: names and brands are said as they are
   // only for real names ("Nutella", "Tokyo Dome"): capitalised, and unknown to both the cards and the dictionary
-  if(!/^[A-Z0-9][A-Za-z0-9'&.-]*( [A-Z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(word)||dictLookup(word.toLowerCase()).length||rank(word.toLowerCase()).some(a=>a[0]>=18))return null;
+  if(!isName(word))return null;
   fillHTML.last=p[0].replace("〜",word);
-  return`<div class="card dict"><div class="where">Built by the app: a hand-written pattern + your word as it is</div>${ttsBlock(p[0].replace("〜",word),base.e.romaji.replace("~",word),"")}<div class="en">${en}</div><div class="note">“${esc(word)}” is not in the dictionary. Names, brands and borrowed words are usually said as they are, with a Japanese accent.</div><div class="tags"><span>pattern + word</span></div></div>`;
+  return`<div class="card dict"><div class="where">Built by the app: a hand-written pattern + your word as it is</div>${ttsBlock(p[0].replace("〜",word),base.e.romaji.replace("~",word),patSay(base.e,word))}<div class="en">${en}</div><div class="note">“${esc(word)}” is not in the dictionary. Names, brands and borrowed words are usually said as they are, with a Japanese accent.</div><div class="tags"><span>pattern + word</span></div></div>`;
 }
 
 // ---------- sentence builder without any AI ----------
@@ -244,6 +244,15 @@ const C=(jp,kana)=>[jp,kana===undefined?jp:kana];
 const DET={this:[C("この")],these:[C("この")],that:[C("その")],those:[C("その")],my:[C("私","わたし"),C("の")],our:[C("私たち","わたしたち"),C("の")],his:[C("彼","かれ"),C("の")],her:[C("彼女","かのじょ"),C("の")]};
 const PRON={this:C("これ"),that:C("それ"),it:C("それ"),these:C("これ"),those:C("それ"),"this one":C("これ"),"that one":C("それ"),here:C("ここ"),there:C("そこ"),"over there":C("あそこ"),
   he:C("彼","かれ"),she:C("彼女","かのじょ"),we:C("私たち","わたしたち"),i:C("私","わたし"),"this place":C("ここ"),"that place":C("そこ")};
+// A word with no dictionary meaning at all and no card ("Nutella", "nutella", "Tokyo Dome")
+// is treated as a name or brand and said as it is. Capital letters are not required.
+function isName(w){
+  if(!/^[A-Za-z0-9][A-Za-z0-9'&.-]*( [A-Za-z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(w))return false;
+  const l=w.toLowerCase(),X=wix();
+  if(NOTNOUN.has(l)||NOTWORD.has(l)||TIME[l]!==undefined||PBLOCK.has(l)||l.split(" ").some(p=>NOTWORD.has(p)||NOTNOUN.has(p)||STOP.has(p)))return false;
+  for(const f of[l,l.replace(/s$/,""),l.replace(/es$/,""),l.replace(/ing$/,""),l.replace(/ed$/,""),l.replace(/ly$/,"")])if(X.get(gkey(f))||window.SYN&&window.SYN[f])return false;
+  return!dictLookup(l).length&&!rank(l).some(a=>a[0]>=18);
+}
 function NP(s){
   s=s.trim();const l=s.toLowerCase();
   if(PRON[l])return{chunks:[PRON[l]],used:[],pron:l};
@@ -260,8 +269,8 @@ function NP(s){
   }
   if(n){chunks.push(C(n.jp,n.kana));used.push(n)}
   else{   // a real name ("Kyoto Tower", "Nutella") is said as it is
-    if(!/^[A-Z0-9][A-Za-z0-9'&.-]*( [A-Z0-9][A-Za-z0-9'&.-]*){0,2}$/.test(rest)||dictLookup(rest.toLowerCase()).length||rank(rest.toLowerCase()).some(a=>a[0]>=18))return null;
-    chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"a name, said as it is"});
+    if(!isName(rest))return null;
+    chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"not in the dictionary: names and brands are said as they are, with a Japanese accent"});
   }
   if(det&&DET[det])chunks.unshift(...(far&&det==="that"?[C("あの")]:DET[det]));
   return{chunks,used,en:rest};
@@ -365,7 +374,7 @@ function VP(s){
     const m=/^(.*?)(?:(?:^| )(to|at|in|with|from|by) (.+))?$/i.exec(rest);if(!m)return null;
     let obj=m[1].trim(),pp=m[2]?[m[2].toLowerCase(),m[3]]:null;
     if(pp&&/\b(to|at|in|with|from|by|on|for|about|into)\b/i.test(pp[1]))return null;   // two "to/at/with" parts: too complex
-    if(/\b(on|for|about|into|because|and|but|if|when|so)\b/i.test(obj))return null;
+    if(/\b(on|for|about|into|because|and|but|if|when|so)\b/i.test(obj)||/ly$/i.test(obj)&&!PREF.n[obj.toLowerCase()])return null;   // "quickly", "carefully": how-words are not things
     if(pp){
       const np=NP(pp[1]);if(!np||np.pron==="i")return null;
       let part=PREP[pp[0]];
@@ -545,7 +554,7 @@ function composeHTML(q){
   if(rom.some(x=>x==null))return null;
   fillHTML.last=jp;
   const seen=new Set(),used=r.used.filter(u=>!seen.has(u.jp)&&seen.add(u.jp)).map(u=>`<span lang="ja">${esc(u.jp)}</span>${u.kana?" ("+esc(romaji(u.kana)||"")+")":""} = ${esc(short(u.en,70))}`).join("<br>");
-  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),sayAll(r.chunks.map(c=>c[1])))}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
+  return`<div class="card dict"><div class="where">Built by the app: grammar rules + words from the cards and dictionary · the whole sentence was not checked by a person</div>${ttsBlock(jp,rom.join(" "),(()=>{const a=r.chunks.map(c=>c[1]==null?c[0]:sayWord(c[1]));return a.some(x=>x==null)?"":a.join(" ")})())}<div class="en">${esc(r.en)}</div><div class="note">Words used (check they mean what you want):<br>${used}</div>${r.notes.map(n=>`<div class="note">${esc(n)}</div>`).join("")}<div class="tags"><span>built sentence</span></div></div>`;
 }
 // When no sentence could be built: every important word on its own, to point at or say one by one.
 function wordsHTML(q){
@@ -983,7 +992,20 @@ async function send(q){
   busy=false;
 }
 bar.addEventListener("submit",ev=>{ev.preventDefault();send(aq.value)});
-window.__ask={ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
+// Used by the Search tab: the built sentence (or the exact hand-written card) for a whole sentence.
+function buildFor(q){
+  if(!tok){   // the word checker is still loading: redo the search when it is ready
+    ensureTok().then(()=>{const el=document.getElementById("q");if(tok&&el&&el.value.trim()===q&&window.search)window.search()});
+    return"";
+  }
+  try{
+    const same=exactSent(q);
+    if(same)return quoted(q)?`<div class="aimeta">A hand-written card says exactly this:</div>`+cardHTML(same.x.e,same.x.where):"";
+    return ruleFill(q)||composeHTML(q)||"";
+  }catch(e){return""}
+}
+(window.requestIdleCallback||setTimeout)(()=>ensureTok(),{timeout:5000});   // load the word checker in the background at startup
+window.__ask={build:buildFor,ruleFill,retrieve,check:s=>check(s),render,romaji,send,show,drawPanel,bestModel,
   compose:q=>{const r=compose(q);return r&&{jp:r.chunks.map(c=>c[0]).join(""),romaji:r.chunks.map(c=>c[1]==null?c[0]:romaji(c[1])).join(" "),used:r.used.map(u=>u.jp+"="+u.en)}},
   wordsHTML,word:(e,t)=>word(e,t),pref:()=>PREF,byJP,exactSent,
   state:()=>({key:!!gKey(),model:gModel(),tok:!!tok}),ready:()=>ensureTok(),clear:()=>{history=[]}};
