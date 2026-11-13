@@ -68,6 +68,9 @@ function findNoun1(w,only){
   if(only==="card")return null;
   const d=dictWord(w,"n");
   if(d&&!/[〜~\/\s]/.test(d.jp)&&(d.pos||"").split(",").includes("N"))return d;
+  // any common dictionary noun whose meaning is exactly this word (JMdict marks it as a noun)
+  const dl=dictLookup(w).find(d=>d[5]&&!/(^|,)x(,|$)/.test(d[6]||"")&&!/[〜~\/\s]/.test(d[0]));
+  if(dl)return{jp:dl[0],kana:dl[1],pos:dl[6]||"",en:dl[4].split(";")[0].trim(),kind:"dictionary"};
   const ps=w.split(" ");
   // "iron nugget", "wooden sword": a material + a thing is joined with の (tetsu no nagetto)
   if(ps.length===2&&MATERIAL[ps[0]]){const a=findNoun(MATERIAL[ps[0]]),b=findNoun(ps[1]);
@@ -220,7 +223,8 @@ const PREF={n:{wall:"壁",door:"ドア",window:"窓",room:"部屋",house:"家",h
   stay:"泊まる",touch:"触る","try on":"試着",order:"注文",reserve:"予約",book:"予約",cancel:"キャンセル",check:"確認",confirm:"確認",charge:"充電",exchange:"交換",call:"電話",phone:"電話",
   "wake up":"起きる","get up":"起きる",sell:"売る",cook:"料理",drive:"運転",travel:"旅行",shop:"買い物","go shopping":"買い物",smoke:"吸う",throw:"捨てる","throw away":"捨てる",
   push:"押す",press:"押す",pull:"引く",stop:"止まる",hurry:"急ぐ",ask:"聞く",answer:"答える",practice:"練習",explain:"説明",translate:"翻訳",repeat:"繰り返す",bring:"持ってくる|持って来る",
-  "pick up":"拾う",search:"探す","look for":"探す","search for":"探す",die:"死ぬ",laugh:"笑う",cry:"泣く",dance:"踊る",fly:"飛ぶ",win:"勝つ",lose2:"負ける",join:"参加",clean:"掃除",fix:"直す",repair:"直す",
+  "pick up":"拾う",kick:"蹴る",punch:"殴る",hit:"叩く",fight:"戦う",steal:"盗む",bite:"噛む",catch:"捕まえる",chase:"追いかける",break:"壊す",hug:"抱きしめる",kiss:"キス",kill:"殺す",scare:"驚かす",
+  search:"探す","look for":"探す","search for":"探す",die:"死ぬ",laugh:"笑う",cry:"泣く",dance:"踊る",fly:"飛ぶ",win:"勝つ",lose2:"負ける",join:"参加",clean:"掃除",fix:"直す",repair:"直す",
   "take a photo":"撮る","take a picture":"撮る","take photos":"撮る","take pictures":"撮る","take a shower":"浴びる","take a bath":"入る","take a break":"休む","take a rest":"休む"}};
 const FIXOBJ={"take a photo":"写真","take a picture":"写真","take photos":"写真","take pictures":"写真","take a shower":"シャワー","take a bath":"お風呂|風呂"};
 // English verbs whose Japanese depends too much on the situation to build safely
@@ -290,6 +294,8 @@ function NP(s){
     if(!isName(rest))return null;
     chunks.push([rest,null]);used.push({jp:rest,kana:null,en:"not in the dictionary: names and brands are said as they are, with a Japanese accent"});
   }
+  const FAMILY=/^(おばあちゃん|おじいちゃん|お母さん|お父さん|お兄さん|お姉さん|弟|妹|両親|家族|息子|娘|夫|妻)$/;
+  if(det==="my"&&n&&FAMILY.test(n.jp))det=null;   // "my mom" -> just お母さん: Japanese leaves "my" out for family
   if(det&&DET[det])chunks.unshift(...(far&&det==="that"?[C("あの")]:DET[det]));
   return{chunks,used,en:rest};
 }
@@ -351,7 +357,7 @@ function vend(w,f){
   }
   return null;
 }
-const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch"};
+const IRR={ate:"eat",went:"go",came:"come",saw:"see",bought:"buy",drank:"drink",slept:"sleep",met:"meet",paid:"pay",ran:"run",sat:"sit",stood:"stand",lost:"lose",forgot:"forget",found:"find",sent:"send",wore:"wear",swam:"swim",sang:"sing",taught:"teach",heard:"hear",brought:"bring",chose:"choose",drove:"drive",flew:"fly",held:"hold",rode:"ride",sold:"sell",woke:"wake",won:"win",began:"begin",spoke:"speak",wrote:"write",told:"tell",threw:"throw",cut:"cut",read:"read",broke:"break",caught:"catch",stole:"steal",bit:"bite",fought:"fight",hit:"hit",kicked:"kick",chased:"chase",hugged:"hug"};
 function enVerb(w){
   if(IRR[w]&&w!=="cut"&&w!=="read")return{c:[IRR[w]],past:true};
   if(/ing$/.test(w)&&w.length>4){const b=w.slice(0,-3);return{c:[b,b+"e",b.replace(/(.)\1$/,"$1")],ing:true}}
@@ -408,7 +414,7 @@ function VP(s){
       }else{
         const np=NP(obj);if(!np||np.pron==="i"||np.pron==="we"||np.pron==="he"||np.pron==="she")return null;
         let part;
-        if(NIOBJ.has(v.jp))part=C("に");else if(GAOBJ.has(v.jp))part=C("が");
+        if(v.jp==="戦う")part=C("と");else if(NIOBJ.has(v.jp))part=C("に");else if(GAOBJ.has(v.jp))part=C("が");
         else if(/(^|,)vt/.test(v.pos)||(/(^|,)vs/.test(v.pos)&&!/(^|,)vi/.test(v.pos)))part=C("を","お");
         else return null;   // this verb takes no direct object: not built
         pre.push(...np.chunks,part);used.push(...np.used);
@@ -587,6 +593,19 @@ function compose(q){
     e=vend(vp.v,f);
     return e&&out([...pre,...e],vp.used,f==="temorau"?["A polite way to ask someone to do something for you."]:[]);
   }
+  // --- someone or something else does it: "the dinosaur ate my homework", "my dad is cooking" ---
+  {const ws=l.split(" ");
+   for(let i=1;i<ws.length&&i<=4;i++){
+     const head=ws.slice(0,i).join(" ");
+     if(/^(i|we|you|it|they|he|she|this|that|there|here|what|who|where|how|why|when|which|do|does|did|can|could|will|would|please|lets|is|are|was|were)$/i.test(ws[0]))break;
+     let rest=s.slice(head.length).trim(),ing=false;
+     const am=/^(is|are|was|were) /i.exec(rest);if(am){if(!/^[a-z]+ing\b/i.test(rest.slice(am[0].length)))continue;ing=true;rest=rest.slice(am[0].length)}
+     const np=NP(s.slice(0,head.length));if(!np||np.pron)continue;
+     const vp=VP(rest);if(!vp||vp.ing!==ing)continue;
+     const f=ing?(/^(行く|来る|帰る|戻る)$/.test(vp.v.jp)?"masu":"teiru"):vp.past?"mashita":"masu";
+     const e=vend(vp.v,f);if(!e)continue;
+     return out([...np.chunks,GA,...vp.pre,...e],[...np.used,...vp.used]);
+   }}
   // --- "eat this" / "wait here", said as a request ---
   if(please){const vp=VP(s);if(vp&&!vp.ing&&!vp.past){const e=vend(vp.v,"tekudasai");if(e)return out([...vp.pre,...e],vp.used)}}
   return null;
